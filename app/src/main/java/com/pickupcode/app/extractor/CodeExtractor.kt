@@ -42,6 +42,11 @@ object CodeExtractor {
     // 热循环正则预编译：避免每行/每次调用重复编译 Regex（原在 normalizeText 与逐行前缀匹配内 new）
     private val WHITESPACE_REGEX = Regex("\\s+")
     private val JOINED_PREFIX_CODE = Regex("^[餐件货单]码[A-Za-z0-9].*")
+    // OCR 把段间分隔符"-"读成中文"一"（如 取件码:3一1-1099）——仅当"一"夹在数字之间时还原为"-"
+    private val DASH_LIKE_OCR_REGEX = Regex("(?<=\\d)一(?=\\d)")
+    // 上下文邻接噪声（真机日志对照分析新增）：码值紧邻的字符暗示这不是取件码
+    private val AREA_CODE_BEFORE = Regex("\\d{3,4}-$")
+    private val NEXT_LINE_UI_NOISE = Regex("订单|详情|查看物流|查看更多|评价|确认收货|申请售后|待收货|待发货|待付款")
 
     private const val SCORE_PREFIXED = 100f; private const val SCORE_THREE_SEG = 95f
     private const val SCORE_FOUR_SEG = 95f
@@ -127,8 +132,10 @@ object CodeExtractor {
                 }
             }
         }
+        // OCR 把段间分隔符"-"读成中文"一"（如 取件码:3一1-1099）：仅当"一"夹在数字之间时还原为"-"
+        val built = DASH_LIKE_OCR_REGEX.replace(sb.toString(), "-")
         // 压缩连续空白为单个空格，去首尾
-        return sb.toString().replace(WHITESPACE_REGEX, " ").trim()
+        return built.replace(WHITESPACE_REGEX, " ").trim()
     }
 
     // ---------------------------------------------------------------
@@ -182,6 +189,7 @@ object CodeExtractor {
             PREFIXED_CODE.find(line.text)?.let { m ->
                 // OCR 常把前缀与码值间的连字符读进码值（取件码-12345 → "-12345"），trim 掉首尾 '-' 再校验
                 val code = m.groupValues[2].trim('-')
+                if (hasAdjacentNoise(line.text, m)) return@let
                 if (isValidStrongContextCode(code)) {
                     val p = m.groupValues[1]
                     candidates.add(Candidate(code,
@@ -212,9 +220,12 @@ object CodeExtractor {
         for (i in lines.indices) {
             if (prefixKw.any { lines[i].text.contains(it, ignoreCase = true) } && i + 1 < lines.size) {
                 val nextLine = lines[i + 1].text.trim()
+                // 下一行是订单页 UI 文案（如"202 查看订单详情>"）时不走跨行前缀路径，避免抓错行
+                if (NEXT_LINE_UI_NOISE.containsMatchIn(nextLine)) continue
                 // Match pure numbers or letter-dash-number codes on the next line
                 val nextMatch = NEXT_LINE_CODE.find(nextLine)
-                if (nextMatch != null && isValidStrongContextCode(nextMatch.groupValues[1].trim('-'))) {
+                if (nextMatch != null && !hasAdjacentNoise(nextLine, nextMatch) &&
+                    isValidStrongContextCode(nextMatch.groupValues[1].trim('-'))) {
                     val code = nextMatch.groupValues[1].trim('-')
                     val isFood = lines[i].text.contains("餐") || lines[i].text.contains("单")
                     candidates.add(Candidate(code,
@@ -232,7 +243,7 @@ object CodeExtractor {
         for (line in lines) {
             PING_CODE.findAll(line.text).forEach matchLoop@{ m ->
                 val code = m.groupValues[1].trim('-')
-                if (!isValidStrongContextCode(code) || code.length < 2) return@matchLoop
+                if (hasAdjacentNoise(line.text, m) || !isValidStrongContextCode(code) || code.length < 2) return@matchLoop
                 var s = SCORE_PREFIXED - PING_BASE_PENALTY
                 if (PARCEL_KEYWORDS.any { line.text.contains(it) }) s += PING_PARCEL_BONUS
                 if (THREE_SEGMENT_PARCEL.matches(code) || FOUR_SEGMENT_PARCEL.matches(code)) s += PING_MULTISEG_BONUS
@@ -293,6 +304,7 @@ object CodeExtractor {
             val size = sizeBonus(line, avgFontHeight)
             for (rule in rules) {
                 rule.regex.findAll(line.text).forEach matchLoop@{ m ->
+                    if (hasAdjacentNoise(line.text, m)) return@matchLoop
                     if (isExcluded(m.value, context)) {
                         // 诊断：被自学习排除词命中时单独提示（普通排除原因不逐条打，避免刷屏）
                         if (context != null && PatternLearner.isLearnedExcluded(m.value, context)) {
@@ -404,8 +416,12 @@ object CodeExtractor {
         }
         val seen = mutableSetOf<String>()
         val results = mutableListOf<ExtractedCode>()
-        val top = candidates.firstOrNull()?.score ?: 0f
-        for (c in candidates) {
+        // 子串消除（真机日志对照分析新增）：OCR 截断/规则重叠会产生"长码的子串"（如 3-6-403 是 3-6-4035 的子串、
+        // 1-6-5020 的子串 6-5020），只保留最长者，避免短残码入库
+        val byLen = candidates.sortedByDescending { it.code.length }
+        val keptCands = byLen.filter { c -> byLen.none { o -> o !== c && c.code in o.code && o.code.length > c.code.length } }
+        val top = keptCands.firstOrNull()?.score ?: 0f
+        for (c in keptCands) {
             if (c.code in seen) continue; seen.add(c.code)
             // 修复多通知同屏漏识别：强上下文证据码(PREFIXED/凭条/段式)不过 top×0.75 阈值，
             // 只对无证据的弱候选(纯数字噪声)做 top×0.75 过滤，避免高分码拖死同屏次高分真实码。
@@ -433,6 +449,8 @@ object CodeExtractor {
     private fun isValidStrongContextCode(code: String): Boolean {
         val c = code.trim()
         if (c.isBlank() || c.length > 12) return false
+        // OCR 常在码尾粘入字母（如 3-1-403x 应为 3-1-4035）：合法格式全部以数字结尾，尾部字母一律拒绝
+        if (c.last().isLetter()) return false
         return if (c.all { it.isDigit() } && c.length in 2..3) {
             !CodeValidator.isContentNoise(c)
         } else {
@@ -452,6 +470,25 @@ object CodeExtractor {
         if (box.height() > LARGE_FONT_HEIGHT_PX) b += SIZE_BIG_FONT_BONUS
         if (avgFontHeight > 0 && box.height() > avgFontHeight * FONT_SIZE_RATIO_THRESHOLD) b += SIZE_RATIO_BONUS
         return b
+    }
+
+    /**
+     * 上下文邻接噪声：码值紧邻的字符暗示这不是取件码（真机日志对照分析新增，来源：49 张真实截图）。
+     * - 电量百分比：`529%`（battery）
+     * - 掩码手机号：`86-182****6726`（号码保护）
+     * - 时间/日期尾随冒号：`20:15`、`08-0617:11:21`
+     * - 国标号：`GB/T19777`（山西老陈醋标准号）
+     * - 座机区号前缀：`0394-8301307`（6-8 位纯数字且前邻 3-4 位区号）
+     */
+    private fun hasAdjacentNoise(line: String, match: MatchResult): Boolean {
+        val code = match.value
+        val after = line.getOrNull(match.range.last + 1)
+        if (after == '%' || after == '*') return true
+        if (after == ':' && code.length <= 8) return true
+        if (match.range.first >= 3 && line.substring(match.range.first - 3, match.range.first) == "GB/") return true
+        if (code.length in 6..8 && code.all { it.isDigit() } &&
+            AREA_CODE_BEFORE.containsMatchIn(line.substring(0, match.range.first))) return true
+        return false
     }
 
     // ---------------------------------------------------------------

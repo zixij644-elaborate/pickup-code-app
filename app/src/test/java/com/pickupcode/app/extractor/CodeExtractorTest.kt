@@ -148,4 +148,76 @@ class CodeExtractorTest {
         val r = CodeExtractor.extract(listOf(line("韵达快递435316307329341 您的快件已到")))
         assertTrue(r.none { it.code == "435316307329341" }, "运单号不应被识别为取件码")
     }
+
+    // ── 真机日志对照分析修复的回归测试（49 张真实截图发现）──
+
+    @Test
+    @DisplayName("电量百分比 529% 不当作取件码，同屏真实码仍提取")
+    fun extract_rejects_battery_percent() {
+        val r = CodeExtractor.extract(listOf(line("取件码 590297"), line("529%")))
+        assertTrue(r.none { it.code == "529" }, "电量 529% 不应被提取，实际: ${r.map { it.code }}")
+        assertTrue(r.any { it.code == "590297" }, "真实码 590297 应保留，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("国标号 GB/T19777 不当作取件码（T19777 拒绝）")
+    fun extract_rejects_gb_standard_number() {
+        val r = CodeExtractor.extract(listOf(line("买醋认准GB/T19777 山西老陈醋")))
+        assertTrue(r.none { it.code == "T19777" }, "标准号 T19777 不应被提取，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("座机区号前缀 0394-8301307 不当作取件码")
+    fun extract_rejects_area_code_phone() {
+        val r = CodeExtractor.extract(listOf(line("揽投部[电话:0394-8301307,投诉电话]")))
+        assertTrue(r.none { it.code == "8301307" }, "座机号码 8301307 不应被提取，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("掩码手机号 86-182****6726 不当作取件码")
+    fun extract_rejects_masked_phone() {
+        val r = CodeExtractor.extract(listOf(line("张潇戈 86-182****6726 号码保护中")))
+        assertTrue(r.none { it.code == "86-182" }, "掩码手机号片段 86-182 不应被提取，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("时间 20:15 不当作取件码（跨行前缀路径也不抓）")
+    fun extract_rejects_clock_time() {
+        val r = CodeExtractor.extract(listOf(line("取件码"), line("20:15")))
+        assertTrue(r.none { it.code == "20" }, "时间 20 不应被提取，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("跨行前缀路径不抓订单页 UI 文案（202 查看订单详情）")
+    fun extract_nextLine_ui_noise() {
+        val r = CodeExtractor.extract(listOf(
+            line("取件码3-6-4035"),
+            line("202 查看订单详情>")
+        ))
+        assertTrue(r.none { it.code == "202" }, "UI 文案 202 不应被提取，实际: ${r.map { it.code }}")
+        assertTrue(r.any { it.code == "3-6-4035" }, "真实码 3-6-4035 应保留，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("OCR 中文一误读段分隔符：3一1-1099 归一化后提取 3-1-1099")
+    fun extract_normalize_chinese_dash() {
+        assertEquals("取件码:3-1-1099", CodeExtractor.normalizeText("取件码:3一1-1099"))
+        val r = CodeExtractor.extract(listOf(line("取件码:3一1-1099 复制")))
+        assertTrue(r.any { it.code == "3-1-1099" }, "应提取 3-1-1099，实际: ${r.map { it.code }}")
+        assertTrue(r.none { it.code == "1-1099" }, "残码 1-1099 不应出现，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("OCR 码尾粘字母（3-1-403x）拒绝")
+    fun extract_rejects_trailing_letter() {
+        val r = CodeExtractor.extract(listOf(line("取件码3-1-403x")))
+        assertTrue(r.none { it.code == "3-1-403x" }, "残码 3-1-403x 不应被提取，实际: ${r.map { it.code }}")
+    }
+
+    @Test
+    @DisplayName("OCR 截断残码是长码子串时只保留长码（3-6-403 与 3-6-4035 同屏）")
+    fun extract_substring_dedup() {
+        val r = CodeExtractor.extract(listOf(line("取件码3-6-4035"), line("取件码3-6-403")))
+        assertEquals(listOf("3-6-4035"), r.map { it.code }, "应只保留完整码 3-6-4035")
+    }
 }
