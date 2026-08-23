@@ -174,6 +174,17 @@ class CodeExtractorTest {
     }
 
     @Test
+    @DisplayName("真实中通行（网点电话:0394-8301307）即使同屏有取件码也不混入")
+    fun extract_rejects_real_area_code_line() {
+        val r = CodeExtractor.extract(listOf(
+            line("包裏等间题诗联系快递员.网点电话:0394-8301307,投"),
+            line("取件码:3-1-1099 复制")
+        ))
+        assertTrue(r.none { it.code == "8301307" }, "8301307 不应出现，实际: ${r.map { it.code }}")
+        assertTrue(r.any { it.code == "3-1-1099" }, "真实码 3-1-1099 应保留，实际: ${r.map { it.code }}")
+    }
+
+    @Test
     @DisplayName("掩码手机号 86-182****6726 不当作取件码")
     fun extract_rejects_masked_phone() {
         val r = CodeExtractor.extract(listOf(line("张潇戈 86-182****6726 号码保护中")))
@@ -219,5 +230,27 @@ class CodeExtractorTest {
     fun extract_substring_dedup() {
         val r = CodeExtractor.extract(listOf(line("取件码3-6-4035"), line("取件码3-6-403")))
         assertEquals(listOf("3-6-4035"), r.map { it.code }, "应只保留完整码 3-6-4035")
+    }
+
+    @Test
+    @DisplayName("餐饮取餐截图带支付信息不被金融闸门误杀（取单码+微信支付）")
+    fun financial_gate_keeps_dining_order() {
+        assertFalse(
+            CodeExtractor.isFinancialNoise("取单码 商品明细 LINLEE林里 微信支付 付款方式 实付14.8"),
+            "带取单码的餐饮截图不应判为金融噪音"
+        )
+        assertFalse(
+            CodeExtractor.isFinancialNoise("茶百道 排队提醒 取餐号 0147 微信支付已扣款"),
+            "带取餐号/排队的餐饮截图不应判为金融噪音"
+        )
+    }
+
+    @Test
+    @DisplayName("纯金融通知仍被金融闸门拦截（无取餐信号）")
+    fun financial_gate_blocks_pure_finance() {
+        assertTrue(
+            CodeExtractor.isFinancialNoise("您的信用卡还款 5000 元已到账"),
+            "无取餐信号的金融通知仍应拦截"
+        )
     }
 }
