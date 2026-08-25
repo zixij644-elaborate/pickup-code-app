@@ -53,7 +53,7 @@ import java.time.format.DateTimeFormatter
 fun TrashScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
-    val trashHistory by db.codeHistoryDao().getTrashFlow().collectAsState(initial = emptyList())
+    val trashHistory by db.repository.observeTrash().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -105,12 +105,12 @@ fun TrashScreen(onBack: () -> Unit) {
                             item = item,
                             onRestore = {
                                 scope.launch(Dispatchers.IO) {
-                                    db.codeHistoryDao().restore(item.id)
+                                    db.repository.restore(item.id)
                                 }
                             },
                             onDelete = {
                                 scope.launch(Dispatchers.IO) {
-                                    db.codeHistoryDao().deleteById(item.id)
+                                    db.repository.deleteById(item.id)
                                 }
                             }
                         )

@@ -94,7 +94,8 @@ private data class SettingsCtx(
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onStatsClick: () -> Unit = {}) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    // 进程级 scope：防抖落盘/权限回调等 fire-and-forget 写不随页面销毁取消（否则 400ms 内返回会丢 Key/URL）
+    val scope = com.pickupcode.app.App.appScope
     val settingsFlow = remember { AppPreferences.observe(ctx) }
     val s by settingsFlow.collectAsState(initial = AppPreferences.Settings())
 
@@ -693,6 +694,18 @@ private fun DebouncedKeyField(
     val scope = rememberCoroutineScope()
     // 用 remember 持有 Job，避免重组时重置为 null 导致防抖失效（H5）
     val saveJob = remember { mutableStateOf<Job?>(null) }
+    // 离开页面时若仍有未提交的防抖输入，立即落盘，避免 400ms 内返回导致 Key/URL 静默丢失
+    val latestText = remember { mutableStateOf(text) }
+    latestText.value = text
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            saveJob.value?.cancel()
+            // 仅当与外部 value 不同才提交，避免无改动的多余写
+            if (latestText.value != value) {
+                onCommit(latestText.value)
+            }
+        }
+    }
 
     OutlinedTextField(
         value = text,

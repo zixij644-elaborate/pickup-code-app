@@ -24,7 +24,6 @@ import com.pickupcode.app.service.RecognitionPipeline
 import com.pickupcode.app.util.ImageUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -386,13 +385,12 @@ object ShareReceiver {
                 }
             }
 
-            // AI 异步并行合并（同码同 type 去重；格式已由 isValidPickupCode 把关）
+            // AI 补识别：与短信路径对齐，设超时预算，超时仅用正则结果，绝不拖死落库/通知
             if (settings.enableAI && settings.apiKey.isNotBlank()) {
-                val aiDeferred = scope.async(Dispatchers.IO) {
+                val aiRes = kotlinx.coroutines.withTimeoutOrNull(8_000L) {
                     AIExtractor.extract(allText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
                 }
-                try {
-                    val aiRes = aiDeferred.await()
+                if (aiRes != null) {
                     if (aiRes.error != null) Log.w(TAG, "AI 识别失败: ${aiRes.error}")
                     if (BuildConfig.DEBUG) {
                         Log.d(TAG, "AI 识别返回 ${aiRes.results.size} 条: " +
@@ -401,13 +399,10 @@ object ShareReceiver {
                     for (ai in aiRes.results) {
                         if (isTypeDisabled(ai.type, settings)) continue
                         if (allResults.any { it.code == ai.code && it.type == ai.type }) continue // 同码同type去重
-                        // 构造与正则同结构的 ExtractedCode，source 用 AI 识别结果
                         allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
                     }
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "AI 结果合并异常: ${e.message}")
+                } else {
+                    Log.d(TAG, "AI 超时未返回（预算 8000ms），仅用正则结果")
                 }
             } else {
                 Log.d(TAG, "AI 识别未启用（enableAI=${settings.enableAI}, apiKey非空=${settings.apiKey.isNotBlank()}），跳过")
@@ -471,17 +466,18 @@ object ShareReceiver {
                         val pCode = res.pickUpCode ?: return@launch
                         if (res.pickUpAddress.isNullOrBlank().not()) {
                             // Low-3: 优先定向更新本次保存的记录（同码可能有多行历史，findByCodeAndType 会命中错误行）
+                            // 定向列更新，避免整行 update 用旧快照覆盖用户并发编辑
                             val targetId = savedIdsByCode[pCode]
                             if (targetId != null) {
-                                db.codeHistoryDao().getByIdSuspend(targetId)?.let { rec ->
+                                db.repository.getByIdSuspend(targetId)?.let { rec ->
                                     if (rec.pickupAddress.isBlank()) {
-                                        db.codeHistoryDao().update(rec.copy(pickupAddress = res.pickUpAddress))
+                                        db.repository.updatePickupAddress(targetId, res.pickUpAddress!!)
                                     }
                                 }
                             } else {
-                                val rec = db.codeHistoryDao().findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
+                                val rec = db.repository.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
                                 if (rec != null && rec.pickupAddress.isBlank()) {
-                                    db.codeHistoryDao().update(rec.copy(pickupAddress = res.pickUpAddress))
+                                    db.repository.updatePickupAddress(rec.id, res.pickUpAddress!!)
                                 }
                             }
                         }
@@ -493,12 +489,9 @@ object ShareReceiver {
         }
     }
 
-    /** 该类型是否被用户关闭（抽取共用，避免在多个分支重复 switch） */
-    private fun isTypeDisabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean = when (type) {
-        CodeExtractor.CodeType.pickup_food -> !settings.enableFoodCodes
-        CodeExtractor.CodeType.pickup_parcel -> !settings.enableParcelCodes
-        CodeExtractor.CodeType.coupon -> !settings.enableCouponCodes
-    }
+    /** 该类型是否被用户关闭（统一走 RecognitionPipeline，避免三份 switch 漂移） */
+    private fun isTypeDisabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean =
+        !RecognitionPipeline.isTypeEnabled(type, settings)
 
     /** 多图分享提示（ACTION_SEND_MULTIPLE 暂不支持逐张处理，明确告知用户）。 */
     private fun showMultiShareHint(context: Context) {

@@ -141,7 +141,7 @@ interface CodeHistoryDao {
     }
 }
 
-@Database(entities = [CodeHistory::class], version = 6, exportSchema = true)
+@Database(entities = [CodeHistory::class], version = 7, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun codeHistoryDao(): CodeHistoryDao
     val repository: CodeRepository by lazy { CodeRepository(codeHistoryDao()) }
@@ -185,6 +185,47 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 6 → 7：清理 1→3 时代遗留、当前实体已不存在的孤儿列
+         * （stationName/stationType/codeConfirmed/sourceConfirmed）。
+         * 方式：建新表（只含实体字段）→ 拷贝 → 删旧表 → 改名，保留全部数据。
+         * 列类型与 Room schema（6.json）一致：Boolean→INTEGER，Float→REAL。
+         */
+        private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS code_history_new (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "code TEXT NOT NULL, " +
+                        "type TEXT NOT NULL, " +
+                        "source TEXT NOT NULL, " +
+                        "screenshotPath TEXT NOT NULL, " +
+                        "rawTextSnippet TEXT NOT NULL, " +
+                        "pickupAddress TEXT NOT NULL, " +
+                        "geoVerified INTEGER NOT NULL, " +
+                        "geoConfidence REAL NOT NULL, " +
+                        "geoFormattedAddress TEXT NOT NULL, " +
+                        "timestamp INTEGER NOT NULL, " +
+                        "isActive INTEGER NOT NULL, " +
+                        "doneAt INTEGER NOT NULL, " +
+                        "shareSourcePkg TEXT NOT NULL, " +
+                        "shareSourceName TEXT NOT NULL, " +
+                        "cabinetNumber TEXT NOT NULL, " +
+                        "expiryTime INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT INTO code_history_new (id, code, type, source, screenshotPath, rawTextSnippet, " +
+                        "pickupAddress, geoVerified, geoConfidence, geoFormattedAddress, timestamp, isActive, doneAt, " +
+                        "shareSourcePkg, shareSourceName, cabinetNumber, expiryTime) " +
+                        "SELECT id, code, type, source, screenshotPath, rawTextSnippet, " +
+                        "pickupAddress, geoVerified, geoConfidence, geoFormattedAddress, timestamp, isActive, doneAt, " +
+                        "shareSourcePkg, shareSourceName, cabinetNumber, expiryTime FROM code_history"
+                )
+                db.execSQL("DROP TABLE code_history")
+                db.execSQL("ALTER TABLE code_history_new RENAME TO code_history")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -195,7 +236,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "pickup_code_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     // 不再使用 fallbackToDestructiveMigration：它会静默删库重建，导致用户取件记录无提示丢失。
                     // 已开 exportSchema=true（schemaLocation 见 build.gradle.kts）让 Room 校验迁移，
                     // 未来迁移写错时应升级失败报错，而不是清空核心数据。

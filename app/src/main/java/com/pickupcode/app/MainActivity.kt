@@ -193,7 +193,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun DetailScreenWrapper(codeId: Long, onBack: () -> Unit) {
         val db = AppDatabase.getInstance(this)
-        val item by db.codeHistoryDao().getById(codeId).collectAsState(initial = null)
+        val item by db.repository.getById(codeId).collectAsState(initial = null)
 
         item?.let { code ->
             CodeDetailScreen(
@@ -213,7 +213,7 @@ class MainActivity : ComponentActivity() {
                 onMarkDone = { id ->
                     lifecycleScope.launch(Dispatchers.IO) {
                         try {
-                            item?.let { db.codeHistoryDao().markDoneByCodeAndType(it.code, it.type) }
+                            item?.let { db.repository.markDoneByCodeAndType(it.code, it.type) }
                         } catch (e: Exception) {
                             Log.e("MainActivity", "标记已取失败", e)
                         }
@@ -233,8 +233,8 @@ class MainActivity : ComponentActivity() {
                 "pickup_parcel" -> CodeExtractor.CodeType.pickup_parcel
                 else -> CodeExtractor.CodeType.pickup_food // 手动录入只支持取餐/取件；默认取餐
             }
-            // 统一走 Repository（saveOrUpdate），与三条识别路径同一去重语义，不再绕过仓库直连 DAO
-            db.repository.save(
+            // 统一走 Repository（saveOrUpdate），与三条识别路径同一去重语义
+            val save = db.repository.save(
                 CodeHistory(
                     code = code,
                     type = codeType.name,
@@ -242,8 +242,16 @@ class MainActivity : ComponentActivity() {
                     rawTextSnippet = "手动输入"
                 )
             )
-            com.pickupcode.app.notification.CodeNotificationManager
-                .show(this@MainActivity, code, codeType, source)
+            // 必须传入 historyId，否则通知栏「已取」无法归档（DoneReceiver 要求 historyId > 0）
+            // 重复录入走去重提示，与识别路径 notifySaved 语义一致
+            if (save.existed) {
+                val dupCount = db.repository.countDuplicateGroups()
+                com.pickupcode.app.notification.CodeNotificationManager
+                    .showDuplicate(this@MainActivity, code, codeType, source, save.id, dupCount)
+            } else {
+                com.pickupcode.app.notification.CodeNotificationManager
+                    .show(this@MainActivity, code, codeType, source, historyId = save.id)
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.pickupcode.app.ui.screens.home
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
@@ -73,4 +74,15 @@ class HomeViewModel(private val repo: CodeRepository) : ViewModel() {
             }
         }
     }
+
+    class Factory(private val repo: CodeRepository) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(HomeViewModel::class.java)) {
+                return HomeViewModel(repo) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
+        }
+    }
+
 }

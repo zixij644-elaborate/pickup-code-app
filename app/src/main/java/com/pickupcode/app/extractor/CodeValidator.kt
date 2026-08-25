@@ -127,6 +127,18 @@ object CodeValidator {
     /** 递增字母序列：排除 abcd / bcde ... wxyz（大小写均匹配） */
     private val INCREMENTING_LETTERS = ('a'..'w').map { (it..it + 3).joinToString("") }.toSet()
 
+    /**
+     * 手动录入校验：与 AI 路径对齐——取餐码允许 2-3 位纯数字（如瑞幸「123」，过内容噪声），
+     * 其余类型走全串白名单（取件码仍拒绝 2-3 位裸数字）。
+     */
+    fun isValidManualCode(code: String, type: String): Boolean {
+        val c = code.trim()
+        if (c.isEmpty()) return false
+        val shortFood = type == CodeExtractor.CodeType.pickup_food.name &&
+            c.all { it.isDigit() } && c.length in 2..3
+        return if (shortFood) !isContentNoise(c) else isValidPickupCode(c)
+    }
+
     internal fun isExcluded(code: String, context: Context? = null) =
         EXCLUDE_PATTERNS.any { it.containsMatchIn(code) } ||
         !isValidPickupCode(code) ||

@@ -29,8 +29,15 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Lint
+        run: ./gradlew lintDebug
+
       - name: Build debug APK
         run: ./gradlew assembleDebug
+
+      # Release 编译校验（无 keystore 时产出 unsigned APK，仅验证 R8/proguard 链路不炸）
+      - name: Build release APK (unsigned)
+        run: ./gradlew assembleRelease
 
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest

@@ -77,8 +77,8 @@ fun ManualCodeDialog(
             }
         },
         confirmButton = {
-            // 格式白名单校验：与 AI/正则一致，防任意字符串入库（P7）
-            val valid = code.trim().let { CodeValidator.isValidPickupCode(it) }
+            // 格式白名单：与 AI 路径对齐——取餐码允许 2-3 位纯数字（瑞幸/蜜雪），仍过内容噪声检查
+            val valid = code.trim().let { CodeValidator.isValidManualCode(it, codeType) }
             TextButton(
                 onClick = {
                     if (valid) {

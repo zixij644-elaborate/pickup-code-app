@@ -40,13 +40,13 @@ object CodeNotificationManager {
 
     /**
      * 通知 id 空间划分（互不相交，杜绝各通知族互相覆盖）：
-     *  主通知池  1 .. 0x3FFFFFFF    （递增分配，持久化计数器）
+     *  主通知池  1 .. 0x0FFFFFFF    （递增分配，持久化计数器；上限让位给「已取」号段 0x10000000..0x1FFFFFFF，互不重叠）
      *  提醒      0x40000000 .. 0x5FFFFEFF （code+type 哈希）
      *  去重提示  0x60000000 .. 0x7FFFFEFF （code+type 哈希）
      *  结果提示  0x7FFFFFFF         （PickupCodeAccessibilityService.RESULT_NOTIFY_ID，独占最高位）
      * 提醒/去重两段统一用 % SEGMENT_MODULUS 截取，天然避开 0x7FFFFFFF。
      */
-    private const val MAIN_NOTIFY_LIMIT = 0x40000000      // 主池上界（不含），池内 1..0x3FFFFFFF
+    private const val MAIN_NOTIFY_LIMIT = 0x10000000      // 主池上界（不含），池内 1..0x0FFFFFFF；与「已取」号段 0x10000000+ 完全隔离
     private const val REMIND_SEGMENT_BASE = 0x40000000    // 提醒段基址
     private const val DUP_SEGMENT_BASE = 0x60000000       // 去重段基址
     private const val SEGMENT_MODULUS = 0x1FFFFFFF        // 段内取值模（避开 0x7FFFFFFF 结果通知位）
@@ -55,6 +55,12 @@ object CodeNotificationManager {
      *  供「已取」按 code+type 取消全部相关通知（主通知 + 去重提示 + 提醒）。 */
     private val activeNotifyIds = java.util.concurrent.ConcurrentHashMap<String, MutableSet<Int>>()
 
+    /**
+     * 进程内原子计数器；首次 nextNotifyId 时从 SP 恢复，避免三路径并发读改写同 id。
+     * 持久化仍写 SP（进程重启后继续递增，防止盖掉仍在栏里的旧通知）。
+     */
+    private val notifyIdCounter = java.util.concurrent.atomic.AtomicInteger(-1)
+
     private fun trackNotifyId(type: CodeExtractor.CodeType, code: String, id: Int) {
         activeNotifyIds.getOrPut("$type:$code") { java.util.concurrent.ConcurrentHashMap.newKeySet() }.add(id)
     }
@@ -62,14 +68,37 @@ object CodeNotificationManager {
     /**
      * 持久化递增通知 id：进程重启后计数器继续递增，避免从 1 重新计数后新通知
      * 静默覆盖仍在通知栏的旧常驻通知（用户丢失未处理的取件提醒展示）。
+     * 三路径并发安全：内存 AtomicInteger + synchronized 初始化/落盘。
      */
     private fun nextNotifyId(context: Context): Int {
-        val sp = context.getSharedPreferences("notif_state", Context.MODE_PRIVATE)
-        val counter = sp.getInt("notify_id_counter", 1)
-        val id = ((counter and 0x7fffffff) % (MAIN_NOTIFY_LIMIT - 1)) + 1   // 1..0x3FFFFFFF
-        sp.edit().putInt("notify_id_counter", (counter + 1) and 0x7fffffff).apply()
+        // 懒加载：-1 表示尚未从 SP 恢复
+        if (notifyIdCounter.get() < 0) {
+            synchronized(notifyIdCounter) {
+                if (notifyIdCounter.get() < 0) {
+                    val sp = context.getSharedPreferences("notif_state", Context.MODE_PRIVATE)
+                    val stored = sp.getInt("notify_id_counter", 1).coerceAtLeast(1)
+                    notifyIdCounter.set(stored)
+                }
+            }
+        }
+        val counter = notifyIdCounter.getAndIncrement()
+        // 主池 1..0x0FFFFFFF（不含 0）
+        val id = ((counter and 0x7fffffff) % (MAIN_NOTIFY_LIMIT - 1)) + 1
+        // 异步落盘下一起点（失败不致命，最坏进程重启后可能复用一段 id）
+        try {
+            context.getSharedPreferences("notif_state", Context.MODE_PRIVATE)
+                .edit().putInt("notify_id_counter", (counter + 1) and 0x7fffffff).apply()
+        } catch (_: Exception) { /* ignore */ }
         return id
     }
+
+    /**
+     * 「已取」按钮 PendingIntent 请求码：与主通知 id / 忽略按钮号段隔离。
+     * 旧实现用 nid+1，会与下一条主通知的「忽略」(requestCode=nid) 撞车并 FLAG_UPDATE_CURRENT 改写。
+     * 主池上限 0x0FFFFFFF，故 nid < 0x10000000；本号段 0x10000000..0x1FFFFFFF 与主池/提醒/去重段均不重叠。
+     */
+    private fun doneActionRequestCode(nid: Int): Int =
+        (nid and 0x0fffffff) or 0x10000000
 
     /** 稳定请求码/提醒 id：基于 code+type 复合，减少短码 hashCode 碰撞，并校正非负（保留给 PendingIntent 请求码与提醒通知 ID 空间）。 */
     private fun safeId(type: CodeExtractor.CodeType, code: String): Int =
@@ -134,7 +163,7 @@ object CodeNotificationManager {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .addAction(0, "已取",
-                PendingIntent.getBroadcast(context, (nid + 1) and 0x7fffffff,
+                PendingIntent.getBroadcast(context, doneActionRequestCode(nid),
                     Intent(context, DoneReceiver::class.java).apply {
                         putExtra("history_id", historyId ?: -1)
                         putExtra("notification_id", nid)

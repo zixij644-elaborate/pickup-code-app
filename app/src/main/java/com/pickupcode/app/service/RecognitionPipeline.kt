@@ -147,4 +147,12 @@ object RecognitionPipeline {
             Log.d(tag, "识别入库: $code (${type.name}) from $source @ $address${if (existed) " [DUPLICATE]" else ""}")
         }
     }
+
+    /** 该类型是否被用户开启（三路径共用；替换 Sms/Share/Accessibility 三份 switch 副本）。 */
+    fun isTypeEnabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean = when (type) {
+        CodeExtractor.CodeType.pickup_food -> settings.enableFoodCodes
+        CodeExtractor.CodeType.pickup_parcel -> settings.enableParcelCodes
+        CodeExtractor.CodeType.coupon -> settings.enableCouponCodes
+    }
+
 }

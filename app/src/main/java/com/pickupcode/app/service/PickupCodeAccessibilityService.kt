@@ -451,9 +451,6 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         // Extract address (parcel scenario)
         val address = AddressExtractor.extractAddress(ocrLines, allText)
 
-        // Map verification (async, fire-and-forget)
-        verifyMapAddress(address, settings)
-
         // ⑤ 问题5：若正则未识别到且 AI 也失败，提示里带上失败原因（用户有感知）
         if (notifyIfNoResult(allResults, aiErr, settings, silent, bmp)) return
 
@@ -488,6 +485,9 @@ class PickupCodeAccessibilityService : AccessibilityService() {
                 code = s.code, type = s.type, source = s.source, id = s.id, existed = s.existed
             )
         }
+
+        // 地图地址验证（finalize 之后才有 id，写回 geo 字段与分享路径一致）
+        verifyMapAddress(address, settings, saved.map { it.id })
 
         // ⑦ 快递100 验证：识别到取件码时，用运单号反查取件码/地址作为标准答案，对照 OCR 结果（fire-and-forget）
         verifyWithKuaidi100(settings, allText, address, allResults)
@@ -541,7 +541,13 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         var aiErr: String? = null
         if (aiDeferred != null) {
             try {
-                val aiRes = aiDeferred.await()
+                // 与短信/分享路径对齐：AI 最多等 8s，超时仅用正则结果，不拖死落库/通知
+                val aiRes = kotlinx.coroutines.withTimeoutOrNull(8_000L) { aiDeferred.await() }
+                if (aiRes == null) {
+                    aiDeferred.cancel()
+                    Log.d(TAG, "AI 超时未返回（预算 8000ms），仅用正则结果")
+                    return "AI服务超时"
+                }
                 aiErr = aiRes.error
                 if (aiRes.error != null) {
                     Log.w(TAG, "AI 识别失败: ${aiRes.error}")
@@ -563,15 +569,23 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         return aiErr
     }
 
-    /** 地图地址验证（async, fire-and-forget）。 */
-    private fun verifyMapAddress(address: String, settings: AppPreferences.Settings) {
-        if (settings.enableMapVerify && address.isNotBlank()) {
+    /** 地图地址验证（async, fire-and-forget）：学习 + 定向写回 geo 字段（与分享路径一致）。 */
+    private fun verifyMapAddress(address: String, settings: AppPreferences.Settings, savedIds: List<Long>) {
+        if (settings.enableMapVerify && address.isNotBlank() && savedIds.isNotEmpty()) {
             scope.launch {
-                PostVerifier.verifyMap(this@PickupCodeAccessibilityService, address, settings.amapApiKey.ifBlank { null }) { conf, _ ->
+                PostVerifier.verifyMap(this@PickupCodeAccessibilityService, address, settings.amapApiKey.ifBlank { null }) { conf, fmtAddr ->
                     try {
                         PatternLearner.recordAddressVerified(this@PickupCodeAccessibilityService, address, conf)
                     } catch (e: Exception) {
                         Log.w(TAG, "recordAddressVerified failed: ${e.message}")
+                    }
+                    try {
+                        val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
+                        for (id in savedIds) {
+                            repo.updateGeo(id, true, conf, fmtAddr ?: "")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "updateGeo failed: ${e.message}")
                     }
                 }
             }
@@ -601,7 +615,7 @@ class PickupCodeAccessibilityService : AccessibilityService() {
     private fun categorizeAiError(err: String): String {
         val e = err.lowercase()
         return when {
-            e.contains("timeout") || e.contains("timed out") -> "AI服务超时"
+            e.contains("timeout") || e.contains("timed out") || e.contains("超时") -> "AI服务超时"
             e.contains("401") || e.contains("unauthorized") || e.contains("api key") || e.contains("invalid key") -> "AI密钥无效"
             e.contains("429") || e.contains("rate limit") || e.contains("too many") -> "AI请求过于频繁"
             e.contains("404") || e.contains("model") -> "AI模型不可用"
@@ -649,10 +663,10 @@ class PickupCodeAccessibilityService : AccessibilityService() {
                     val pCode = res.pickUpCode ?: return@launch
                     // 若 OCR 未识别出地址，且 API 返回了标准地址，定向补全（不覆盖中间用户操作）
                     if (address.isBlank() && !res.pickUpAddress.isNullOrBlank()) {
-                        val dao = AppDatabase.getInstance(this@PickupCodeAccessibilityService).codeHistoryDao()
-                        val rec = dao.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
+                        val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
+                        val rec = repo.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
                         if (rec != null && rec.pickupAddress.isBlank()) {
-                            dao.updatePickupAddress(rec.id, res.pickUpAddress)
+                            repo.updatePickupAddress(rec.id, res.pickUpAddress)
                         }
                     }
                 }
@@ -660,13 +674,8 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun isTypeEnabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean {
-        return when (type) {
-            CodeExtractor.CodeType.pickup_food -> settings.enableFoodCodes
-            CodeExtractor.CodeType.pickup_parcel -> settings.enableParcelCodes
-            CodeExtractor.CodeType.coupon -> settings.enableCouponCodes
-        }
-    }
+    private fun isTypeEnabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean =
+        RecognitionPipeline.isTypeEnabled(type, settings)
 
 
     private fun saveScreenshot(bmp: Bitmap, timestamp: Long): String {

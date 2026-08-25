@@ -70,6 +70,26 @@ class CodeValidatorTest {
     }
 
     @Test
+    @DisplayName("手动录入：取餐码允许 2-3 位纯数字（与 AI 路径对齐）")
+    fun manualFoodShortDigits() {
+        assertTrue(CodeValidator.isValidManualCode("123", "pickup_food"))
+        assertTrue(CodeValidator.isValidManualCode("42", "pickup_food"))
+        assertTrue(CodeValidator.isValidManualCode(" 229 ", "pickup_food"))
+        // 内容噪声仍拦截
+        assertFalse(CodeValidator.isValidManualCode("000", "pickup_food"))
+        assertFalse(CodeValidator.isValidManualCode("1111", "pickup_food"))
+    }
+
+    @Test
+    @DisplayName("手动录入：取件码仍拒绝 2-3 位裸数字（噪声）")
+    fun manualParcelShortDigits() {
+        assertFalse(CodeValidator.isValidManualCode("123", "pickup_parcel"))
+        assertFalse(CodeValidator.isValidManualCode("42", "pickup_parcel"))
+        assertTrue(CodeValidator.isValidManualCode("5-3858", "pickup_parcel"))
+        assertTrue(CodeValidator.isValidManualCode("10-2-7507", "pickup_parcel"))
+    }
+
+    @Test
     @DisplayName("accepts 4-5 digit pure number as food code")
     fun valid_pureNumberFood() {
         assertTrue(CodeValidator.isValidPickupCode("2024"))

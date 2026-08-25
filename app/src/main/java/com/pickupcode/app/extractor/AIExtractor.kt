@@ -15,6 +15,7 @@ import java.net.URL
  */
 object AIExtractor {
 
+    /** IPv4 点分；IPv6 由下方 contains(':') / 括号字面量另行拦截。 */
     private val IP_HOST_REGEX = Regex("""\d{1,3}(\.\d{1,3}){3}""")
 
     data class AIResult(
@@ -59,9 +60,16 @@ object AIExtractor {
             val parsed = java.net.URI.create(apiBaseUrl).toURL()
             require(parsed.protocol == "https") { "API Base URL must use HTTPS" }
             // H-C: 拒绝 IP/localhost，避免 Bearer key 发往任意端点（用户仍可配信任的域名服务）
-            val host = parsed.host
-            require(host != null && !IP_HOST_REGEX.matches(host) && host != "localhost") {
-                "API 地址请使用域名（拒绝 IP / localhost）"
+            val host = parsed.host?.lowercase()
+            // 拒绝 IPv4 / IPv6（含 [//::1] 字面量 host）/ localhost / *.local，避免 Bearer key 发往任意端点
+            val isIpOrLocal = host == null
+                || host == "localhost"
+                || host.endsWith(".local")
+                || host == "0.0.0.0"
+                || IP_HOST_REGEX.matches(host)
+                || host.contains(':') // IPv6 raw or zone-id forms
+            require(!isIpOrLocal) {
+                "API 地址请使用域名（拒绝 IP / localhost / IPv6）"
             }
             val url = URL("${parsed.toString().trimEnd('/')}/chat/completions")
             conn = url.openConnection() as HttpURLConnection

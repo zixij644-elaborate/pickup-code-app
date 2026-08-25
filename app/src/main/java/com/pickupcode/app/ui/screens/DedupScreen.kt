@@ -32,7 +32,7 @@ fun DedupScreen(onBack: () -> Unit) {
 
     fun reload() {
         scope.launch {
-            val raw = withContext(Dispatchers.IO) { db.codeHistoryDao().getDuplicateEntries() }
+            val raw = withContext(Dispatchers.IO) { db.repository.getDuplicateEntries() }
             // 按 code+type 聚合：每个重复码一组，组内是全部重复记录
             val grouped = raw.groupBy { "${it.code}\u0000${it.type}" }
             groups = grouped
@@ -113,7 +113,7 @@ private fun DuplicateGroupCard(entries: List<CodeHistory>, onChanged: () -> Unit
                         scope.launch(Dispatchers.IO) {
                             // 保留这一条，批量删除其他重复（一次性事务，避免逐条删中断残留）
                             val toDelete = entries.filterIndexed { i, _ -> i != idx }.map { it.id }
-                            if (toDelete.isNotEmpty()) db.codeHistoryDao().deleteByIds(toDelete)
+                            if (toDelete.isNotEmpty()) db.repository.deleteByIds(toDelete)
                             onChanged()
                         }
                     }) { Text("保留这条", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }

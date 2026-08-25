@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -92,7 +93,8 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getInstance(context) }
-    val vm = remember { HomeViewModel(db.repository) }
+    // 注册到 ViewModelStore，使 viewModelScope 随 Activity/导航正确 onCleared（勿用 remember 假 VM）
+    val vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory(db.repository))
     val activeHistory by vm.activeHistory.collectAsState()
     val trashHistory by vm.trashHistory.collectAsState()
     val scope = rememberCoroutineScope()

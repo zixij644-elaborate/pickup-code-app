@@ -157,12 +157,9 @@ class SmsReceiver : BroadcastReceiver() {
         }
     }
 
-    /** 该类型是否被用户开启（与无障碍路径 isTypeEnabled 对齐）。 */
-    private fun isTypeEnabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean = when (type) {
-        CodeExtractor.CodeType.pickup_food -> settings.enableFoodCodes
-        CodeExtractor.CodeType.pickup_parcel -> settings.enableParcelCodes
-        CodeExtractor.CodeType.coupon -> settings.enableCouponCodes
-    }
+    /** 该类型是否被用户开启（统一走 RecognitionPipeline，避免三份 switch 漂移）。 */
+    private fun isTypeEnabled(type: CodeExtractor.CodeType, settings: AppPreferences.Settings): Boolean =
+        RecognitionPipeline.isTypeEnabled(type, settings)
 
     /** 节流状态持久化读写（进程重启后仍生效）。存 body 的「长度:hash」而非原文，避免长短信占空间。 */
     private fun readThrottle(context: Context): Pair<Long, String> {

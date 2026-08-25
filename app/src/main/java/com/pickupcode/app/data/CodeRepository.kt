@@ -45,9 +45,21 @@ class CodeRepository(private val dao: CodeHistoryDao) {
     suspend fun findSameCodeDifferentType(code: String, type: String): List<CodeHistory> =
         dao.findSameCodeDifferentType(code, type)
 
+    suspend fun countActiveByCodeAndType(code: String, type: String): Int =
+        dao.countActiveByCodeAndType(code, type)
+
     suspend fun deleteById(id: Long) = dao.deleteById(id)
 
-    suspend fun update(history: CodeHistory) = dao.update(history)
-
     fun getById(id: Long): Flow<CodeHistory?> = dao.getById(id)
+
+    suspend fun getByIdSuspend(id: Long): CodeHistory? = dao.getByIdSuspend(id)
+
+    suspend fun getDuplicateEntries(): List<CodeHistory> = dao.getDuplicateEntries()
+
+    suspend fun deleteByIds(ids: List<Long>) = dao.deleteByIds(ids)
+
+    suspend fun markDone(id: Long, doneAt: Long = System.currentTimeMillis()) =
+        dao.markDone(id, doneAt)
+
+
 }

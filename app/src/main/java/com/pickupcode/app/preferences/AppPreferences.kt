@@ -100,7 +100,7 @@ object AppPreferences {
         val apiKey: String = "",
         val apiBaseUrl: String = "https://api.openai.com/v1",
         val apiModel: String = "gpt-4o-mini",
-        val enableAI: Boolean = true,
+        val enableAI: Boolean = false,  // 默认关闭：避免配置 Key 后静默外发 OCR/短信全文；用户显式开启
         val enableIntentReceive: Boolean = true,
         val enableShareDetection: Boolean = true,
         val enableMapVerify: Boolean = false,
@@ -125,7 +125,7 @@ object AppPreferences {
                 apiKey = decrypt(prefs[KEY_API_KEY] ?: ""),
                 apiBaseUrl = prefs[KEY_API_BASE_URL] ?: "https://api.openai.com/v1",
                 apiModel = prefs[KEY_API_MODEL] ?: "gpt-4o-mini",
-                enableAI = prefs[KEY_ENABLE_AI] ?: true,
+                enableAI = prefs[KEY_ENABLE_AI] ?: false,
                 enableIntentReceive = prefs[KEY_ENABLE_INTENT_RECEIVE] ?: true,
                 enableShareDetection = prefs[KEY_ENABLE_SHARE_DETECTION] ?: true,
                 enableMapVerify = prefs[KEY_ENABLE_MAP_VERIFY] ?: false,
