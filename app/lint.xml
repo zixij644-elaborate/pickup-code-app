@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Android Lint 配置。
+  ProduceStateDoesNotAssignValue 为官方已知误报（value 赋值检测失败）：
+  - issuetracker.google.com/issues/349411310  False positive in ProduceStateDoesNotAssignValue lint check
+  - issuetracker.google.com/issues/376491756  lint check does not grok assignment
+  项目中的 produceState 均在 producer 块内直接 value = ... 赋值（合法写法），故忽略此规则。
+-->
+<lint>
+    <issue id="ProduceStateDoesNotAssignValue" severity="ignore"/>
+</lint>
