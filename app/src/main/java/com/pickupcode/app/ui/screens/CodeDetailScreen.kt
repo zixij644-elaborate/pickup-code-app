@@ -66,7 +66,8 @@ fun CodeDetailScreen(
     // Medium-5: 6 个 PatternLearner 状态改用 produceState 在 IO 线程异步读取初始值
     var confirmState by remember { mutableStateOf(DetailConfirmState()) }
     val loadedConfirmState by produceState(initialValue = DetailConfirmState(), item.id) {
-        value = withContext(Dispatchers.IO) {
+        // 先算后赋：lint ProduceStateDoesNotAssignValue 要求 value 赋值直接位于 producer 块内
+        val loaded = withContext(Dispatchers.IO) {
             DetailConfirmState(
                 codeConfirmed = PatternLearner.isCodeConfirmed(ctx, item.id),
                 codeIncorrect = PatternLearner.isCodeIncorrect(ctx, item.id),
@@ -76,6 +77,7 @@ fun CodeDetailScreen(
                 addrIncorrect = PatternLearner.isAddrIncorrect(ctx, item.id)
             )
         }
+        value = loaded
     }
     LaunchedEffect(loadedConfirmState) {
         // 仅在用户尚未交互（confirmState 仍为默认全 false）时回填异步加载的初始值，
@@ -198,7 +200,8 @@ fun CodeDetailScreen(
 
                 // C2: 常用取件点提示（IO 线程查，避免组合期主线程解析 JSON）
                 val freqPoint by produceState<CommonStationStore.PickupPoint?>(null, item.pickupAddress) {
-                    value = withContext(Dispatchers.IO) { CommonStationStore.isFrequentPickupPoint(ctx, item.pickupAddress) }
+                    val point = withContext(Dispatchers.IO) { CommonStationStore.isFrequentPickupPoint(ctx, item.pickupAddress) }
+                    value = point
                 }
                 val freq = freqPoint  // 捕获局部值，便于智能转换
                 if (freq != null) {
