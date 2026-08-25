@@ -6,6 +6,11 @@
     <!-- 短信取件码自动识别（可选开关；RECEIVE_SMS 用于接收 SMS_RECEIVED 广播） -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
+    <!-- 声明短信能力为可选硬件：避免无 telephony 硬件（如平板/Wi-Fi-only）设备被 Play 过滤，lint PermissionImpliesUnsupportedHardware 要求 -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
     <application
         android:name=".App"
         android:allowBackup="false"
