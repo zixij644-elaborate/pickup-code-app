@@ -67,13 +67,16 @@ object BrandResolver {
     )
 
     internal fun sourceFromLine(line: OCREngine.TextLine, hint: String, allLines: List<OCREngine.TextLine>, allText: String): String {
-        // Strategy (ordered by reliability):
-        // 1. Brand near order/tracking number (courier name usually before order number)
-        // 2. Bracket brand validated against known brands
-        // 3. Brand+suffix pattern (X快递, X速递, X物流...)
-        // 4. Brand in ±3 lines from the code
-        // 5. Fallback
-
+        // 解析顺序（2026-09-16 重排：**先局部、后全屏**）：
+        // 1. 码值同行/±2 行的【品牌】括号
+        // 2. 码值所在**卡片**（±3 行）的运单号定位品牌      ← 多码同框的品牌归属靠这一步
+        // 3. 码值同行 / ±3 行的「品牌+后缀」（如 圆通快递:YTO...）
+        // 4. 码值 ±3 行内出现的品牌词
+        // 5. 全屏兜底：运单号定位 → 【品牌】括号 → 品牌+后缀
+        //
+        // 为什么必须局部优先：真机反例（拼多多「待取件」三卡列表，2026-09-08 截图）——
+        // 三个码分属申通/圆通/顺丰，旧实现先跑全屏 `extractBrandViaOrderNum(allText)`，
+        // 命中的是**第一张卡**的运单号与其前的品牌，于是三个码全被标成「申通」。
         val codeLineIdx = allLines.indexOfFirst { it === line }
 
         // --- S0: Bracket brand on/nearest the code's own line (before global fallback) ---
@@ -90,26 +93,23 @@ object BrandResolver {
             COURIER_BRANDS.firstOrNull { content.contains(it) }?.let { return it }
         }
 
-        // --- S1: Extract brand via order/tracking number positioning ---
-        // Courier name typically appears before the tracking number.
-        // Find order numbers, then grab the nearest brand before them.
-        if (hint in listOf("parcel", "取件码", "取货码")) {
-            extractBrandViaOrderNum(allText, allLines)?.let { return it }
+        // --- 局部窗口：码值所在卡片的行 ---
+        val localLines: List<OCREngine.TextLine> = localWindow(line, allLines, codeLineIdx, LOCAL_WINDOW_PX, LOCAL_WINDOW_PX)
+        val isParcelHint = hint in listOf("parcel", "取件码", "取货码")
+        val isFoodHint = hint in listOf("food", "取餐码", "取餐号")
+
+        // --- S1-local: 本卡片的运单号 → 本卡片的品牌（多码同框的关键步骤）---
+        // 运单号行在卡片里通常位于码值下方 180~250px（真机通知卡片实测），
+        // 因此这里用「向下放宽」的窗口；否则会退化成用站点品牌（欢猫智柜/兔喜）顶替快递公司（极兔/中通）。
+        if (isParcelHint && localLines.isNotEmpty()) {
+            val orderWindow = localWindow(line, allLines, codeLineIdx, LOCAL_WINDOW_PX, LOCAL_WINDOW_BELOW_PX)
+            extractBrandViaOrderNum(orderWindow.joinToString(" ") { it.text }, orderWindow)?.let { return it }
         }
 
-        // --- S2: Bracket brand validation ---
-        BRACKET_BRAND.find(allText)?.let { m ->
-            val content = m.groupValues[1].trim()
-            FOOD_BRAND_KEYWORDS.firstOrNull { content.contains(it, ignoreCase = true) }
-                ?.let { return it }
-            COURIER_BRANDS.firstOrNull { content.contains(it) }
-                ?.let { return it }
-        }
-
-        // --- S3: Brand+suffix at line level ---
-        val brands = if (hint in listOf("food", "取餐码", "取餐号")) FOOD_BRAND_KEYWORDS else COURIER_BRANDS
-        val ignoreCase = hint in listOf("food", "取餐码", "取餐号")
-        val brandSuffixRegex = if (hint in listOf("food", "取餐码", "取餐号")) FOOD_BRAND_SUFFIX_REGEX else COURIER_BRAND_SUFFIX_REGEX
+        // --- S2-local: 本行 / ±3 行的「品牌+后缀」---
+        val brands = if (isFoodHint) FOOD_BRAND_KEYWORDS else COURIER_BRANDS
+        val ignoreCase = isFoodHint
+        val brandSuffixRegex = if (isFoodHint) FOOD_BRAND_SUFFIX_REGEX else COURIER_BRAND_SUFFIX_REGEX
 
         fun brandWithSuffix(text: String): String? {
             // M11: 用预编译正则，避免每次调用逐品牌重新编译
@@ -119,32 +119,77 @@ object BrandResolver {
             return null
         }
 
-        // S3a: Current line
         brandWithSuffix(line.text)?.let { return it }
+        for (neighbor in localLines) {
+            if (neighbor === line) continue
+            brandWithSuffix(neighbor.text)?.let { return it }
+        }
 
-        // S3b: Nearby lines (±3)
-        if (codeLineIdx >= 0) {
-            for (offset in sequenceOf(-1, 1, -2, 2, -3, 3)) {
-                allLines.getOrNull(codeLineIdx + offset)?.let { neighbor ->
-                    brandWithSuffix(neighbor.text)?.let { return it }
-                }
+        // --- S3-local: 本卡片内出现的品牌词（按长度降序，长品牌优先）---
+        if (localLines.isNotEmpty()) {
+            val localText = localLines.joinToString(" ") { it.text }
+            for (brand in brands.sortedByDescending { it.length }) {
+                if (localText.contains(brand, ignoreCase)) return brand
             }
         }
 
-        // --- S4: Global brand+suffix fallback ---
+        // --- 全屏兜底 ---
+        // G1: Extract brand via order/tracking number positioning（Courier name typically appears before the tracking number）
+        if (isParcelHint) {
+            extractBrandViaOrderNum(allText, allLines)?.let { return it }
+        }
+
+        // G2: Bracket brand validation
+        BRACKET_BRAND.find(allText)?.let { m ->
+            val content = m.groupValues[1].trim()
+            FOOD_BRAND_KEYWORDS.firstOrNull { content.contains(it, ignoreCase = true) }
+                ?.let { return it }
+            COURIER_BRANDS.firstOrNull { content.contains(it) }
+                ?.let { return it }
+        }
+
+        // G3: Global brand+suffix fallback
         brandWithSuffix(allText)?.let { return it }
 
-        // --- S5: Proximity-based brand mention (any occurrence near code) ---
-        if (codeLineIdx >= 0) {
-            val contextLines = allLines.slice(maxOf(0, codeLineIdx - 3)..minOf(allLines.lastIndex, codeLineIdx + 3))
-            val contextText = contextLines.joinToString(" ") { it.text }
-            for (brand in brands.sortedByDescending { it.length }) {
-                if (contextText.contains(brand, ignoreCase))
-                    return brand
-            }
-        }
+        return if (isFoodHint) "餐饮" else "快递"
+    }
 
-        return if (hint in listOf("food", "取餐码", "取餐号")) "餐饮" else "快递"
+    /** 品牌局部归属的窗口行数：无坐标（短信/纯文本）时按数组 ±3 行。 */
+    private const val LOCAL_WINDOW = 3
+
+    /** 有坐标时的纵向窗口：真机列表卡片间距实测约 275px，±150px 能圈住本卡而不串到相邻卡。 */
+    private const val LOCAL_WINDOW_PX = 150
+
+    /** 运单号定位用的**向下**放宽窗口：卡片里运单号行常比码值低 180~250px。 */
+    private const val LOCAL_WINDOW_BELOW_PX = 280
+
+    /**
+     * 码值所在**卡片**的行集合（品牌归属的作用域）。
+     * - 有 boundingBox：取纵向距离在 [abovePx, belowPx] 内的行，并**按与码行的距离升序**排列，
+     *   这样 [extractBrandViaOrderNum] 命中的是"本卡最近的运单号"，而不是列表里第一张卡的。
+     * - 无 boundingBox（短信/划词）：退回数组 ±[LOCAL_WINDOW] 行，保持原顺序。
+     */
+    private fun localWindow(
+        line: OCREngine.TextLine,
+        allLines: List<OCREngine.TextLine>,
+        codeLineIdx: Int,
+        abovePx: Int,
+        belowPx: Int
+    ): List<OCREngine.TextLine> {
+        if (codeLineIdx < 0) return emptyList()
+        val codeCenter = line.boundingBox?.centerY()
+            ?: return allLines.subList(
+                maxOf(0, codeLineIdx - LOCAL_WINDOW),
+                minOf(allLines.size, codeLineIdx + LOCAL_WINDOW + 1)
+            )
+        return allLines
+            .filter { l ->
+                if (l === line) return@filter true
+                val c = l.boundingBox?.centerY() ?: return@filter false
+                val d = c - codeCenter
+                d >= -abovePx && d <= belowPx
+            }
+            .sortedBy { l -> kotlin.math.abs((l.boundingBox?.centerY() ?: codeCenter) - codeCenter) }
     }
 
     /** Extract courier brand by looking at text before order/tracking numbers,

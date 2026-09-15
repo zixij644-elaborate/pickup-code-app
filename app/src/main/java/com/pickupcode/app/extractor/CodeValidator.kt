@@ -129,7 +129,7 @@ object CodeValidator {
         Regex("[A-Za-z]-\\d{3,4}", RegexOption.IGNORE_CASE),          // LETTER_DASH_THREE
         Regex("\\d{1,2}-\\d{3,5}"),                                     // DIGIT_DASH_PARCEL 兔喜式（5-3858）
         Regex("\\d{6,8}"),                                            // LONG_NUMBER
-        Regex("[A-Z]\\s*-?\\s*\\d{2,4}", RegexOption.IGNORE_CASE),  // LETTER_NUMBER_FOOD
+        Regex("[A-Z]-?\\d{2,4}", RegexOption.IGNORE_CASE),  // LETTER_NUMBER_FOOD（内部不允许空格：见 CodeExtractor 同规则注释）
         // PURE_NUMBER_FOOD：手动/AI 校验无上下文，收紧为 4-5 位，避免 2-3 位裸数字(42/123)被当合法码
         Regex("\\d{4,5}"),
         // PREFIXED_CODE / PING_CODE 格式：覆盖带前缀上下文的码值（如 取餐码AB12 等）

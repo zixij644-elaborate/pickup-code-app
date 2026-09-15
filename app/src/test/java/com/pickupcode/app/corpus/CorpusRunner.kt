@@ -74,6 +74,14 @@ object CorpusRunner {
                 failures += "码 ${ca.code} 窗口地址不符：期望含[${ca.address}]，实际=[$got]"
             }
         }
+        for (cs in f.expectedCodeSources) {
+            val got = results.firstOrNull { it.code == cs.code }
+            if (got == null) {
+                failures += "码 ${cs.code} 未识别，无法核对品牌（期望 ${cs.source}）"
+            } else if (!got.source.contains(cs.source)) {
+                failures += "码 ${cs.code} 品牌不符：期望含[${cs.source}]，实际=[${got.source}]"
+            }
+        }
         return CorpusResult(
             fixture = f, gatedByFinancialNoise = gated, actualCodes = actual,
             actualAddress = loc.fullAddress, actualStation = loc.stationName,

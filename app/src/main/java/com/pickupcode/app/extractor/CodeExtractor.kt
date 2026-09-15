@@ -27,7 +27,9 @@ object CodeExtractor {
     // 码值紧贴中文（如 "749019复制"）时 \b 失效漏抓；桌面 JVM 测不出来（ASCII \b），真机必现。    // A8-3-3315: letter prefix + 3 dash-separated segments, e.g. locker codes (A/B/C prefix)
     private val LETTER_THREE_SEG_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z]\\d{1,2})-(\\d{1,2})-(\\d{3,6})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     private val LETTER_DASH_THREE_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z])-(\\d{3,4})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
-    private val LETTER_NUMBER_FOOD = Regex("(?<![\\dA-Za-z])([A-Z]\\s*[-]?\\s*\\d{2,4})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
+    // 字母+数字（餐饮取餐码）：**不允许内部空格**。2026-09-16 真实语料回归（58 张真机截图）发现：
+    // 美团券页把「¥10.8 ¥16」OCR 成「H 10.8 *6」，旧的 \s* 写法把 "H 10"（码值里还带空格）当取餐码入库。
+    private val LETTER_NUMBER_FOOD = Regex("(?<![\\dA-Za-z])([A-Z]-?\\d{2,4})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     private val PURE_NUMBER_FOOD = Regex("(?<![\\dA-Za-z-])(\\d{2,5})(?![\\dA-Za-z])")
     private val PREFIXED_CODE = Regex("(取[餐件货单]码|取餐号|取单号|排号|提取码)[:：]?\\s*(?:为|是)?\\s*([A-Za-z0-9\\-]{2,12})")
     // 券号（团购券/到店券的数字券码）：OCR 常按字符间隙拆出空格（券号1242 10464170 754），
@@ -40,6 +42,22 @@ object CodeExtractor {
     // 否则"231607 到育新路..."这类码后跟真实地址的会被漏抓（需保留开头强锚定 + 后不能紧邻数字/破折号）
     private val NEXT_LINE_CODE = Regex("^\\s*([A-Za-z0-9\\-]{2,12})\\s*(?![-\\d])")
     private val CODE_KEYWORD_NEAR = Regex("(取[件餐货]码|取餐号|驿站|快递柜|自提柜|取件点)")
+    /**
+     * 「标签在上一行、码值在下一行」用的**整行标签**（`^..$` 锚定，标签行自身不含码值才算）。
+     * 真机案例（2026-09-16 真实语料）：美团外卖配送页「取餐号」(y=803) 正下方 y=843 是唯一真实码 WJO01，
+     * 但 OCR 行数组里中间插进了地图标签行，"按数组下标的下一行"规则完全取不到 → 见 [nearestWholeLineCodeBelow]。
+     */
+    private val LABEL_FOR_CODE = Regex("^(取[餐件货单][码号]|取餐号|取单号|提取码|凭条号)$")
+    /** 整行就是一个码值（跨行标签规则的取值约束，避免从句子里抠片段）。 */
+    private val WHOLE_LINE_CODE = Regex("^([A-Za-z0-9][A-Za-z0-9\\-]{1,11})$")
+    private const val LABEL_GAP_LINES = 3
+    private const val LABEL_GAP_MIN_PX = 48
+    /**
+     * 餐饮"局部证据"标签：字母+数字码不能只靠"全屏某处出现取餐"就采信
+     * （真机反例：高德/美团地图上的沪常高速编号 S26，同一屏有「取餐号」但相隔 13 行 / 纵向 400px）。
+     */
+    private val FOOD_LABEL_LOCAL = Regex("(取[餐单][码号]|排号|请取餐|正在制作|等待取餐|取餐)")
+    private const val FOOD_LABEL_WINDOW_LINES = 2
     private val ORDER_LONG_SQL = Regex("(?<![\\dA-Za-z])\\d{6,}-\\d{5,}(?![\\dA-Za-z])")
     private val ORDER_SHORT_SQL = Regex("(?<![\\dA-Za-z])\\d{2,4}-\\d{3,4}-\\d{4,}(?![\\dA-Za-z])")
     // 热循环正则预编译：避免每行/每次调用重复编译 Regex（原在 normalizeText 与逐行前缀匹配内 new）
@@ -254,9 +272,27 @@ object CodeExtractor {
             }
         }
 
+        // 标签行 + **竖直正下方**的码（2026-09-16 真实语料回归新增）：
+        // OCR 行数组顺序不可靠——地图/浮层标签会插进标签与码值之间，"数组下一行"规则会漏掉真实码。
+        // 真机案例：美团外卖配送页「取餐号」在 y=803，唯一真实码 WJO01 在 y=843，而中间隔了 4 个数组下标。
+        for ((i, labelLine) in lines.withIndex()) {
+            val labelMatch = LABEL_FOR_CODE.find(labelLine.text.trim()) ?: continue
+            val token = nearestWholeLineCodeBelow(lines, i) ?: continue
+            if (!isValidStrongContextCode(token)) continue
+            val isFood = labelMatch.value.contains("餐") || labelMatch.value.contains("单")
+            candidates.add(Candidate(
+                token,
+                if (isFood) CodeType.pickup_food else CodeType.pickup_parcel,
+                SCORE_PREFIXED,
+                sourceFromLine(labelLine, if (isFood) "取餐号" else "取件码", lines, allText),
+                strong = true
+            ))
+        }
+
         data class Rule(val regex: Regex, val type: CodeType, val baseScore: Float,
                         val ctxBonus: Float = 0f, val sizeBonus: Boolean = false, val pureNum: Boolean = false,
-                        val minMatchLen: Int = 0, val isLearned: Boolean = false, val strong: Boolean = false)
+                        val minMatchLen: Int = 0, val isLearned: Boolean = false, val strong: Boolean = false,
+                        val requireLocalCtx: Boolean = false)
 
         // 凭条号句式（凭1-6-5020到...取）：菜鸟驿站/快递柜典型通知，优先且绕过 food 上下文干扰
         for (line in lines) {
@@ -297,7 +333,7 @@ object CodeExtractor {
             // 防 "1-6-5020" 的子串 "6-5020" 被误抓；带"取件码为"前缀的走 PREFIXED_CODE 高分强路径。
             Rule(DIGIT_DASH_PARCEL, CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL),
             Rule(LONG_NUMBER_PARCEL, CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL, SCORE_CTX_BONUS),
-            Rule(LETTER_NUMBER_FOOD, CodeType.pickup_food, SCORE_LETTER_NUM_FOOD, SCORE_CTX_BONUS, true),
+            Rule(LETTER_NUMBER_FOOD, CodeType.pickup_food, SCORE_LETTER_NUM_FOOD, SCORE_CTX_BONUS, true, requireLocalCtx = true),
             Rule(PURE_NUMBER_FOOD, CodeType.pickup_food, SCORE_PURE_NUM_FOOD, SCORE_CTX_BONUS, true, true)
         )
 
@@ -333,7 +369,7 @@ object CodeExtractor {
         // 避免"幽灵匹配"（规则命中但候选因分数过低未进入最终结果）也给规则续命、架空衰减机制。
         val learnedHits = mutableMapOf<String, String>()
 
-        for (line in lines) {
+        for ((lineIdx, line) in lines.withIndex()) {
             val pos = posBonus(line, screenHeight)
             val size = sizeBonus(line, avgFontHeight)
             for (rule in rules) {
@@ -370,6 +406,9 @@ object CodeExtractor {
                     }
 
                     val ctxOk = when (rule.type) { CodeType.pickup_food -> isFoodContext; CodeType.pickup_parcel -> isParcelContext; CodeType.coupon -> false }
+                    // 弱证据餐饮规则（字母+数字）必须有**局部**餐饮信号，不能只靠"全屏某处出现取餐"：
+                    // 真机反例——地图上的高速编号 S26 与「取餐号」同屏但相隔 13 行 / 纵向 400px，曾被当成取餐码入库。
+                    if (rule.requireLocalCtx && !hasLocalFoodSignal(lines, lineIdx, line, avgFontHeight)) return@matchLoop
                     if (ctxOk) s += rule.ctxBonus
                     val conflict = when (rule.type) { CodeType.pickup_food -> isParcelContext && !isFoodContext; CodeType.pickup_parcel -> isFoodContext && !isParcelContext; CodeType.coupon -> false }
                     if (conflict) s -= SCORE_CONFLICT_TYPE_PENALTY
@@ -493,7 +532,6 @@ object CodeExtractor {
     }
 
     private data class Candidate(val code: String, val type: CodeType, val score: Float, val source: String, val strong: Boolean = false)
-
     /**
      * 带强前缀上下文（取件码/取餐码/凭条号等）的码值校验。
      * 标准白名单把纯数字收紧到 4-5 位以上（防裸数字 42/123 噪声），但带"取餐码为123"这类
@@ -510,6 +548,49 @@ object CodeExtractor {
         } else {
             !isExcluded(c)
         }
+    }
+
+    /**
+     * 餐饮候选是否具备**局部**证据（2026-09-16 真实语料回归新增）：
+     * - 本行含餐饮关键词（如「取餐码 A12」）
+     * - 本行字体明显偏大（大号取餐号）
+     * - 前后 ±[FOOD_LABEL_WINDOW_LINES] 行内出现餐饮标签（跨行取餐号）
+     * 反例：美团外卖地图页的 S26（沪常高速编号）离最近的「取餐号」13 行、纵向 400px。
+     */
+    private fun hasLocalFoodSignal(
+        lines: List<OCREngine.TextLine>,
+        lineIdx: Int,
+        line: OCREngine.TextLine,
+        avgFontHeight: Float
+    ): Boolean {
+        if (FOOD_KEYWORDS.any { line.text.contains(it, ignoreCase = true) }) return true
+        val h = line.boundingBox?.height() ?: 0
+        if (h > LARGE_FONT_HEIGHT_PX) return true
+        if (avgFontHeight > 0 && h > avgFontHeight * FONT_SIZE_RATIO_THRESHOLD) return true
+        val from = maxOf(0, lineIdx - FOOD_LABEL_WINDOW_LINES)
+        val to = minOf(lines.size - 1, lineIdx + FOOD_LABEL_WINDOW_LINES)
+        for (j in from..to) if (FOOD_LABEL_LOCAL.containsMatchIn(lines[j].text)) return true
+        return false
+    }
+
+    /**
+     * 取标签行**竖直正下方**最近的整行码值（跨行标签规则的几何版）。
+     * 只处理"标签独占一行"的情形（标签与码同行的由 PREFIXED_CODE 负责，见 [LABEL_FOR_CODE] 的整行锚定）。
+     */
+    private fun nearestWholeLineCodeBelow(lines: List<OCREngine.TextLine>, labelIdx: Int): String? {
+        val labelBox = lines.getOrNull(labelIdx)?.boundingBox ?: return null
+        val maxGap = maxOf(labelBox.height() * LABEL_GAP_LINES, LABEL_GAP_MIN_PX)
+        var best: OCREngine.TextLine? = null
+        for ((j, l) in lines.withIndex()) {
+            if (j == labelIdx) continue
+            val b = l.boundingBox ?: continue
+            val gap = b.top - labelBox.bottom
+            if (gap < 0 || gap > maxGap) continue
+            if (WHOLE_LINE_CODE.find(l.text.trim()) == null) continue
+            val cur = best
+            if (cur == null || b.top < (cur.boundingBox?.top ?: Int.MAX_VALUE)) best = l
+        }
+        return best?.text?.trim()?.let { WHOLE_LINE_CODE.find(it)?.groupValues?.get(1) }
     }
 
     private fun posBonus(line: OCREngine.TextLine, screenHeight: Int): Float {

@@ -344,4 +344,54 @@ class CodeExtractorTest {
             "最弱的 8 位长数字应被阈值淘汰，而不是因为'最长'把阈值拉低后放行: $codes"
         )
     }
+
+    // ── 2026-09-16 真实语料回归（58 张真机相册截图）暴露的三个问题 ──
+
+    private fun boxed(text: String, left: Int, top: Int, w: Int, h: Int) =
+        OCREngine.TextLine(text, OCREngine.LineBox(left, top, left + w, top + h), 0.7f)
+
+    @Test
+    @DisplayName("真实语料·美团外卖地图页：不许把高速编号 S26 当取餐码，要认出标签正下方的 WJO01")
+    fun real_meituanMap_codeBelowLabel() {
+        // 坐标为真机 OCR 原值（1260×2800）。「取餐号」在 y=803，真实码 WJO01 在 y=843（大字号 44px），
+        // 而地图元素 s26（沪常高速）在 y=406 —— 旧实现因"全屏出现取餐"就把 s26 当取餐码。
+        val r = CodeExtractor.extract(
+            listOf(
+                boxed("s26", 37, 406, 39, 22),
+                boxed("蟠龙古镇", 100, 602, 88, 22),
+                boxed("餐厅己接单", 319, 261, 117, 22),
+                boxed("上海美的全", 100, 720, 100, 22),
+                boxed("球创新园区」", 100, 740, 112, 26),
+                boxed("取餐号", 282, 803, 63, 21),
+                boxed("WJO01", 221, 843, 184, 44),
+                boxed("餐厅己接单,预计 18:33 送达", 132, 926, 358, 28)
+            ),
+            screenHeight = 2800
+        )
+        val codes = r.map { it.code }
+        assertTrue(codes.none { it.equals("s26", ignoreCase = true) }, "高速编号 s26 不是取餐码: $codes")
+        assertTrue(codes.contains("WJO01"), "标签正下方的真实取餐号必须识别出来: $codes")
+        assertEquals(CodeExtractor.CodeType.pickup_food, r.first { it.code == "WJO01" }.type)
+    }
+
+    @Test
+    @DisplayName("真实语料·美团券页：价格行「H 10.8 *6」不得被当成取餐码")
+    fun real_couponPriceLine_notFoodCode() {
+        val r = CodeExtractor.extract(listOf(
+            line("券号1242 10464170 754·复制"),
+            line("取餐号"),
+            line("H 10.8 *6")
+        ))
+        val codes = r.map { it.code }
+        assertTrue(codes.none { it.contains(" ") }, "码值不得含空格（旧实现捕出过 \"H 10\"）: $codes")
+        assertTrue(codes.none { it.equals("H10", ignoreCase = true) }, "价格行不是取餐码: $codes")
+        assertTrue(codes.contains("124210464170754"), "同屏的团购券号仍应识别: $codes")
+    }
+
+    @Test
+    @DisplayName("字母+数字取餐码不允许内部空格（A 12 不再被当成 A 12 入码）")
+    fun foodLetterNum_noInnerSpace() {
+        val r = CodeExtractor.extract(listOf(line("瑞幸咖啡"), line("取餐码 A 12")))
+        assertTrue(r.none { it.code.any { c -> c == ' ' } }, "码值不得含空格: ${r.map { it.code }}")
+    }
 }

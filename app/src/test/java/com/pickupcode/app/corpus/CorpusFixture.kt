@@ -10,6 +10,9 @@ data class ExpectedCode(val code: String, val type: CodeExtractor.CodeType)
 /** 每码期望的窗口地址断言（多码同屏场景）。 */
 data class ExpectedCodeAddress(val code: String, val address: String)
 
+/** 每码期望的品牌/来源断言（多码同屏的品牌归属场景）。 */
+data class ExpectedCodeSource(val code: String, val source: String)
+
 /**
  * 一条 corpus 回归语料。文本格式见 [RecognitionDebugStore.exportFixture] 的 KDoc。
  *
@@ -20,6 +23,7 @@ data class ExpectedCodeAddress(val code: String, val address: String)
  * - `E forbid <串>`：绝不应被当成码的串
  * - `E address/station/cabinet/from <值>`：全屏地址管线断言
  * - `E codeaddr <码值> <地址片段>`：按码窗口地址断言
+ * - `E codesource <码值> <品牌>`：按码品牌/来源断言（多码同框的品牌归属）
  */
 data class CorpusFixture(
     val id: String,
@@ -35,6 +39,7 @@ data class CorpusFixture(
     val expectedCabinet: String?,
     val expectedFrom: String?,
     val expectedCodeAddresses: List<ExpectedCodeAddress>,
+    val expectedCodeSources: List<ExpectedCodeSource>,
     val file: String
 ) {
     val allText: String get() = lines.joinToString(" ") { it.text }
@@ -51,6 +56,7 @@ data class CorpusFixture(
             val codes = mutableListOf<ExpectedCode>()
             val forbid = mutableListOf<String>()
             val codeAddrs = mutableListOf<ExpectedCodeAddress>()
+            val codeSources = mutableListOf<ExpectedCodeSource>()
             var address: String? = null
             var station: String? = null
             var cabinet: String? = null
@@ -107,6 +113,11 @@ data class CorpusFixture(
                                 require(q.size == 4) { "${file.name}:$n E codeaddr 需 4 段: $line" }
                                 codeAddrs.add(ExpectedCodeAddress(q[2], q[3]))
                             }
+                            "codesource" -> {
+                                val q = line.split(" ", limit = 4)
+                                require(q.size == 4) { "${file.name}:$n E codesource 需 4 段: $line" }
+                                codeSources.add(ExpectedCodeSource(q[2], q[3]))
+                            }
                             else -> error("${file.name}:$n 未知 E 指令: ${p[1]}")
                         }
                     }
@@ -119,6 +130,7 @@ data class CorpusFixture(
                 allowExtraCodes = allowExtra, lines = lines, expectedCodes = codes,
                 forbiddenCodes = forbid, expectedAddress = address, expectedStation = station,
                 expectedCabinet = cabinet, expectedFrom = from, expectedCodeAddresses = codeAddrs,
+                expectedCodeSources = codeSources,
                 file = file.name
             )
         }

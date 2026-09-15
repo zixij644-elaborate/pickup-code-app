@@ -669,6 +669,26 @@ object AddressExtractor {
         if (windowLines.isEmpty()) return ""
         val windowText = windowLines.joinToString(" ") { it.text }
 
+        // 优先级 0（新增，2026-09-16 多码同框地址串台修复）：
+        // **行内含本码值**的「到…」句式 —— 地址与码写在同一行，是唯一不依赖窗口边界的硬证据。
+        // 真机/短信典型：凭8-2-3311到建设南路取您的快递；而相邻卡片的「凭1-6-5020到育新路北段店」
+        // 在 ±3 行窗口里排在前面，旧实现按行号升序取第一个「到」→ 地址串台到别的码上。
+        for (i in lines.indices) {
+            val t = lines[i].text
+            if (!t.contains(code)) continue
+            for (span in 0..CARD_LINE_WINDOW) {
+                if (i + span >= lines.size) break
+                val combined = (i..i + span).joinToString("") { lines[it].text }
+                // 去掉本码值本身，避免「凭<码>」被当成地址片段
+                ADDR_AFTER_TO.find(combined)?.let { m0 ->
+                    val clean0 = m0.groupValues[1].trim().replace(PING_NOISE_TRAIL, "").trim()
+                    if (!clean0.startsWith("达") && isAddressLike(clean0)) {
+                        return stripBrackets(clean0).take(MAX_ADDRESS_LEN)
+                    }
+                }
+            }
+        }
+
         // 优先级 1：S6 「到…取件/取用」句式（通知体最常见的地址锚点）
         // 地址可能跨行（LINE8"…到育新路与季庄街…社区卫生" + LINE9"所对面2号柜H36…取您的快递"）
         // 仅在本码 ±3 行的窗口内找；含「到」即尝试（同码头尾地址常在码行，无需同行的取件词）
@@ -893,8 +913,23 @@ object AddressExtractor {
         return r
     }
 
-    /** 地址尾部 UI 噪音关键词，出现时截断（展开/复制/拨打电话 等按钮文案）。 */
-    private val ADDR_TRAIL_NOISE = listOf(
+    /** 营销/促销/商品文案关键词：命中即整条判否（不是地址）。
+     *  来源：2026-09-16 真机语料回归（58 张相册截图）里被误当地址的原文。 */
+    private val ADDR_MARKETING_NOISE = listOf(
+        "退货包运费", "包运费", "包邮", "无理由", "运费险", "退货", "七天", "7天",
+        "秒杀", "限时", "疯抢", "抢购", "即将抢完", "优惠", "立减", "满减", "到手价", "券后",
+        "回头客", "已售", "已抢", "全周可用", "免预约", "随时退", "过期退", "先用后付",
+        "直播中", "百亿补贴", "赠品", "试吃", "试用", "去抢购", "查看订单", "查看物流",
+        "订单详情", "汀单", "交易快照", "实付", "合计", "小计", "预计获得", "两个工作日内到账",
+        "导航", "派件中", "运输中", "待收货", "全部 待付款",
+        // 电商店铺/商品页残留（拼多多／淘宝待取件列表里混进来的店铺名与促销角标）
+        "上新", "旗舰店", "专营店", "专卖店", "已拼", "领券", "人付款", "免运费", "预售", "秒付"
+    )
+
+    /** 价格串：地址里不会出现 ¥10.8 / 9.9 元 这类价格。 */
+    private val PRICE_LIKE = Regex("[¥￥]\\s*\\d|\\d+\\.\\d+")
+
+    /** 地址尾部 UI 噪音关键词，出现时截断（展开/复制/拨打电话 等按钮文案）。 */    private val ADDR_TRAIL_NOISE = listOf(
         "展开", "收起", "复制", "订阅提醒", "拨打电话", "拨打", "查看物流", "确认收货", "物流电话", "联系驿站", "联系快递员",
         "分享", "号码保护", "虚拟号码", "已通过虚拟号码发货", "待取件", "物流服务", "物流信息"
     )
@@ -951,6 +986,12 @@ object AddressExtractor {
         // Exclude 快递运单号行："品牌+快递后缀+冒号/空格+长数字串"（如 中通快递:79130792811022）
         // 这是快递详情页的运单号行，绝不可能是指件地址；真实地址不会带"快递:9位以上纯数字"。
         if (COURIER_TRACKING_LINE.containsMatchIn(t)) return false
+        // Exclude 营销/促销/商品 文案（真机语料回归 2026-09-16）：这类文案常含「号/中/站/店」等地址指示字
+        // （如「退货包运费保障中」「家用大号桌面键盘书桌写字垫」「承诺达退货包运费保障中」），
+        // 但绝不可能是指件地址 —— 宁可该码地址为空（走兜底/留空），也不要把垃圾写进记录。
+        if (ADDR_MARKETING_NOISE.any { t.contains(it) }) return false
+        // Exclude 价格串（¥10.8 / 9.9元 / 22.1）
+        if (PRICE_LIKE.containsMatchIn(t)) return false
         // Exclude 订单/交易/UI 界面标签（如 OCR 把「订单详情」读成 订单详惰、交易快照、券号/券码等）——不是取件地址
         // 「商品」单独排除会误杀真实地址「商品街」（如 育新路商品街），仅当不含「商品街」时才排除
         if (listOf("订单", "交易", "快照", "详惰", "详情页", "规格", "小计", "合计", "数量", "券码", "券号").any { t.contains(it) } ||

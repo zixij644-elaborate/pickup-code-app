@@ -2,5 +2,6 @@
 # 若某条开始通过，CorpusRegressionTest 会打印提示，请把它从本文件移除。
 #
 # 格式：一行一个语料 id，# 之后为注释
-
-multi-code-window-overlap   # extractAddressForCode 窗口重叠串台（Phase 3 修复）
+#
+# 2026-09-16：原唯一一条 multi-code-window-overlap（extractAddressForCode 窗口重叠串台）
+# 已由「行内含本码值的『到…』句式优先」修复，清单清空。

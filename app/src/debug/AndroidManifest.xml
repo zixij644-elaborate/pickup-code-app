@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 DEBUG 构建合并（src/debug 源集），release 包不含本清单、也不含 CorpusHarnessActivity。
+  用途：真机语料采集（把真实相册截图批量过一遍识别链路并导出 corpus），见 CorpusHarnessActivity。
+  READ_MEDIA_IMAGES 只加在 debug 上——生产包本来就不申请任何存储权限（分享进来的是 content URI）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <application>
+        <activity
+            android:name="com.pickupcode.app.corpus.CorpusHarnessActivity"
+            android:exported="true"
+            android:label="Corpus Harness" />
+    </application>
+
+</manifest>
