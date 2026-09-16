@@ -39,7 +39,7 @@ class PatternLearnerTest {
         val regex = Regex(re)
         assertTrue(regex.containsMatchIn("1-6-5020"))
         // 历史缺陷：\b 边界下码值紧贴中文时漏抓
-        assertTrue(regex.containsMatchIn("取件码1-6-5020到育新路"), "紧贴中文必须命中: $re")
+        assertTrue(regex.containsMatchIn("取件码1-6-5020到长兴路"), "紧贴中文必须命中: $re")
     }
 
     @Test

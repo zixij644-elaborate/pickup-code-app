@@ -1,7 +1,7 @@
 # id: noise-masked-phone
 # source: screen
-# note: 掩码手机号 86-182****6726 不得被当成取件码（hasAdjacentNoise 的 * 规则）
-L - - - - - 号码保护中 86-182****6726
+# note: 掩码手机号 86-135****2468 不得被当成取件码（hasAdjacentNoise 的 * 规则）
+L - - - - - 号码保护中 86-135****2468
 L - - - - - 取件码 1-6-5020
 
 E code pickup_parcel 1-6-5020

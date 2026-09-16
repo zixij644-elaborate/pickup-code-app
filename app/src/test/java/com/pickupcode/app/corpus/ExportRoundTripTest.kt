@@ -22,7 +22,7 @@ class ExportRoundTripTest {
         val lines = listOf(
             OCREngine.TextLine("取件码", OCREngine.LineBox(100, 900, 300, 960), 0.95f),
             OCREngine.TextLine("1-6-5020", OCREngine.LineBox(100, 980, 420, 1068), 0.96f),
-            OCREngine.TextLine("凭1-6-5020到育新路北段店取您的快递", OCREngine.LineBox(100, 1100, 1000, 1148), 0.9f)
+            OCREngine.TextLine("凭1-6-5020到长兴路北段店取您的快递", OCREngine.LineBox(100, 1100, 1000, 1148), 0.9f)
         )
         val allText = lines.joinToString(" ") { it.text }
         val results = CodeExtractor.extract(lines, 2400, context = null, source = "screen")
@@ -41,7 +41,7 @@ class ExportRoundTripTest {
             }
         )
         RecognitionDebugStore.captureAddress(
-            RecognitionDebugStore.AddressInfo("育新路北段店", "未知站点", "2号柜", "S6a")
+            RecognitionDebugStore.AddressInfo("长兴路北段店", "未知站点", "2号柜", "S6a")
         )
 
         val text = RecognitionDebugStore.exportFixture()
@@ -58,7 +58,7 @@ class ExportRoundTripTest {
             assertEquals(OCREngine.LineBox(100, 900, 300, 960), parsed.lines[0].boundingBox, "坐标应无损往返")
             assertEquals(listOf("1-6-5020"), parsed.expectedCodes.map { it.code })
             assertEquals(CodeExtractor.CodeType.pickup_parcel, parsed.expectedCodes[0].type)
-            assertEquals("育新路北段店", parsed.expectedAddress)
+            assertEquals("长兴路北段店", parsed.expectedAddress)
             assertEquals("2号柜", parsed.expectedCabinet)
             assertEquals("S6a", parsed.expectedFrom)
         } finally {

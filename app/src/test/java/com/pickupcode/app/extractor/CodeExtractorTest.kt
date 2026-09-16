@@ -92,7 +92,7 @@ class CodeExtractorTest {
     @DisplayName("提取兔喜式单段码（取件码为5-3858）")
     fun extract_tuxiDigitDash() {
         val r = CodeExtractor.extract(listOf(
-            line("【兔喜生活】您有包裹已到达育新路北段店，取件码为5-3858，地址:育新路北段爱玛电动车旁边")
+            line("【兔喜生活】您有包裹已到达长兴路北段店，取件码为5-3858，地址:长兴路北段老李超市旁边")
         ))
         assertTrue(r.isNotEmpty(), "应提取出取件码")
         assertEquals("5-3858", r.first().code)
@@ -120,9 +120,9 @@ class CodeExtractorTest {
     @DisplayName("6位纯数字码紧贴中文（欢猫智柜 749019复制）应被提取")
     fun extract_six_digit_adjacent_chinese() {
         val r = CodeExtractor.extract(listOf(
-            line("韵达快递435316307329341 取件码"),
-            line("育新路与李庄街西李庄社区卫生所对面3号柜欢猫智柜"),
-            line("749019复制 您的快件己暂存至周口市育新路3号柜")
+            line("韵达快递435316307300011 取件码"),
+            line("长兴路与长青街西长青社区卫生所对面3号柜欢猫智柜"),
+            line("749019复制 您的快件己暂存至新阳市长兴路3号柜")
         ))
         assertTrue(r.any { it.code == "749019" && it.type == CodeExtractor.CodeType.pickup_parcel },
             "应提取出 749019(pickup_parcel)，实际: ${r.map { "${it.code}(${it.type})" }}")
@@ -145,8 +145,8 @@ class CodeExtractorTest {
     @Test
     @DisplayName("长运单号（15位纯数字）不被当作取件码")
     fun extract_rejects_long_tracking_number() {
-        val r = CodeExtractor.extract(listOf(line("韵达快递435316307329341 您的快件已到")))
-        assertTrue(r.none { it.code == "435316307329341" }, "运单号不应被识别为取件码")
+        val r = CodeExtractor.extract(listOf(line("韵达快递435316307300011 您的快件已到")))
+        assertTrue(r.none { it.code == "435316307300011" }, "运单号不应被识别为取件码")
     }
 
     // ── 真机日志对照分析修复的回归测试（49 张真实截图发现）──
@@ -185,9 +185,9 @@ class CodeExtractorTest {
     }
 
     @Test
-    @DisplayName("掩码手机号 86-182****6726 不当作取件码")
+    @DisplayName("掩码手机号 86-135****2468 不当作取件码")
     fun extract_rejects_masked_phone() {
-        val r = CodeExtractor.extract(listOf(line("张潇戈 86-182****6726 号码保护中")))
+        val r = CodeExtractor.extract(listOf(line("李明 86-135****2468 号码保护中")))
         assertTrue(r.none { it.code == "86-182" }, "掩码手机号片段 86-182 不应被提取，实际: ${r.map { it.code }}")
     }
 
@@ -258,7 +258,7 @@ class CodeExtractorTest {
     @DisplayName("团购券截图带『到店消费』不被金融闸门误杀（券号信号放行）")
     fun financial_gate_keeps_coupon_context() {
         assertFalse(
-            CodeExtractor.isFinancialNoise("请在2026.10.04前到店消费 本单有惊喜 还可获得5元无门槛券 券号1242 10464170 754 复制"),
+            CodeExtractor.isFinancialNoise("请在2026.10.04前到店消费 本单有惊喜 还可获得5元无门槛券 券号1246 1046 4170 008 复制"),
             "带券号的团购券截图不应判为金融噪音"
         )
         assertTrue(
@@ -271,11 +271,11 @@ class CodeExtractorTest {
     @DisplayName("券号长数字（OCR 空格分隔）提取为券码，且不残留 parcel 部分码")
     fun extract_coupon_number_spaced() {
         val r = CodeExtractor.extract(listOf(
-            line("请在2026.10.04前到店消费 券号1242 10464170 754·复制"),
+            line("请在2026.10.04前到店消费 券号1246 1046 4170 008·复制"),
             line("查看订单 购买成功")
         ))
         val coupon = r.filter { it.type == CodeExtractor.CodeType.coupon }
-        assertEquals(listOf("124210464170754"), coupon.map { it.code }, "应还原完整券号")
+        assertEquals(listOf("124610464170008"), coupon.map { it.code }, "应还原完整券号")
         assertTrue(
             r.none { it.type != CodeExtractor.CodeType.coupon },
             "不应残留其他类型的部分码（如 parcel 1242）: ${r.map { it.code }}"
@@ -378,14 +378,14 @@ class CodeExtractorTest {
     @DisplayName("真实语料·美团券页：价格行「H 10.8 *6」不得被当成取餐码")
     fun real_couponPriceLine_notFoodCode() {
         val r = CodeExtractor.extract(listOf(
-            line("券号1242 10464170 754·复制"),
+            line("券号1246 1046 4170 008·复制"),
             line("取餐号"),
             line("H 10.8 *6")
         ))
         val codes = r.map { it.code }
         assertTrue(codes.none { it.contains(" ") }, "码值不得含空格（旧实现捕出过 \"H 10\"）: $codes")
         assertTrue(codes.none { it.equals("H10", ignoreCase = true) }, "价格行不是取餐码: $codes")
-        assertTrue(codes.contains("124210464170754"), "同屏的团购券号仍应识别: $codes")
+        assertTrue(codes.contains("124610464170008"), "同屏的团购券号仍应识别: $codes")
     }
 
     @Test

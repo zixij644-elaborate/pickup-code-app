@@ -1,7 +1,7 @@
 # id: noise-order-number
 # source: screen
 # note: 14 位运单号不得被当成取件码
-L - - - - - 中通快递:79130792811022
+L - - - - - 中通快递:79130792810099
 L - - - - - 取件码 1-6-5020
 
 E code pickup_parcel 1-6-5020

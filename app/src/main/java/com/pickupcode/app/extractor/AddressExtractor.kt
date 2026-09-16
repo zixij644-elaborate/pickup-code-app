@@ -32,17 +32,17 @@ object AddressExtractor {
     // 「地址:」标签标记（S0b 与 extractAddressForCode 共用）
     private val REG_ADDR_LABEL_MARK = Regex("地址[:：]")
 
-    /** 快递运单号行（品牌+快递后缀+冒号/空格+长数字串），如 中通快递:79130792811022——非地址。 */
+    /** 快递运单号行（品牌+快递后缀+冒号/空格+兴数字串），如 中通快递:79130792810099——非地址。 */
     private val COURIER_TRACKING_LINE = Regex("(?:快递|速递|物流|速运|驿站|智能柜)[:：]?\\s*\\d{9,}")
 
     // ---------------------------------------------------------------
-    // 长度/几何容差常量（各步骤共用，按语义分开命名）
+    // 兴度/几何容差常量（各步骤共用，按语义分开命名）
     // ---------------------------------------------------------------
 
-    /** 地址/站名长度上限（take(80) 截断 + isAddressLike 上限，20+ 处共用）。 */
+    /** 地址/站名兴度上限（take(80) 截断 + isAddressLike 上限，20+ 处共用）。 */
     private const val MAX_ADDRESS_LEN = 80
 
-    /** 地址核心长度下限（候选少于 4 字符不算地址/标签值）。 */
+    /** 地址核心兴度下限（候选少于 4 字符不算地址/标签值）。 */
     private const val MIN_ADDRESS_CORE_LEN = 4
 
     /** S0c 列布局：标签与值中心 Y 容差。 */
@@ -188,7 +188,7 @@ object AddressExtractor {
     /** S1: 【】括号站名（无守卫，纯填 stationName）。 */
     private fun stepBracketBrand(allText: String, st: LocationState) {
     // S1: 【】 bracket brand for station name
-    // 优先取含站点/快递关键词的括号；跳过快递员姓名+电话的括号（如【刘趁义:19037835253】）
+    // 优先取含站点/快递关键词的括号；跳过快递员姓名+电话的括号（如【刘趁义:13800000000】）
     // 注意：不设"取第一个括号"的兜底——否则快递员括号会误当站名，留空交给后面的分支补全
     val bracketMatches = BrandResolver.BRACKET_BRAND.findAll(allText).map { it.groupValues[1].trim() }.toList()
     val goodBracket = bracketMatches.firstOrNull { content ->
@@ -230,9 +230,9 @@ object AddressExtractor {
                 val combined = cleanAddress(a + cont.toString())
                 if (isAddressLike(combined)) a = combined
             }
-            // 折叠地址补全：S0-label 抓到的地址可能是被 UI 折叠的短串（如"…育新北展开"或"【xx店:.."），
-            // 而同屏另有更具体的完整街道地址行（快递正文，如 育新路北段爱玛电动车旁边）。
-            // 判断标准：标签行所在卡片窗口（±CARD_LINE_WINDOW 行）内，存在比 a 更长、像地址、
+            // 折叠地址补全：S0-label 抓到的地址可能是被 UI 折叠的短串（如"…新新北展开"或"【xx店:.."），
+            // 而同屏另有更具体的完整街道地址行（快递正文，如 兴兴路北段老李超市旁边）。
+            // 判断标准：标签行所在卡片窗口（±CARD_LINE_WINDOW 行）内，存在比 a 更兴、像地址、
             // 无折叠残留(未闭合括号/省略号/展开) 且含明确街道特征的行 → 就用它替换。
             // 限定窗口：避免多通知同屏时串台到其他通知的地址。
             val streetLike = listOf("路", "街", "巷", "弄", "道", "号店", "小区", "苑", "大厦", "超市", "驿站", "快柜", "智柜", "村", "庄")
@@ -253,7 +253,7 @@ object AddressExtractor {
                         isAddressLike(it)
                 }
                 .maxByOrNull { it.length }
-            // 条件：a 有折叠残留，或（a 是地址但缺明确街道特征时，且能找到更长完整行）→ 替换
+            // 条件：a 有折叠残留，或（a 是地址但缺明确街道特征时，且能找到更兴完整行）→ 替换
             if (better != null && better != a &&
                 (uncleanA || streetLike.none { a.contains(it) })) {
                 a = better
@@ -269,13 +269,13 @@ object AddressExtractor {
 
     /** S0b: "地址:" 标签后跟地址（调用点守卫：地址为空才跑）。 */
     private fun stepAddrLabel(lines: List<OCREngine.TextLine>, st: LocationState) {
-    // S0b: 地址: 后跟收货地址（如 收货地址:河南省周口市郸城县育新北…）
+    // S0b: 地址: 后跟收货地址（如 收货地址:河南省新阳市安平县新新北…）
     // 逐行匹配标签值，避免 ADDR_LABEL 在整屏 allText 上贪婪匹配到无关行尾噪声
     if (st.fullAddress.isEmpty()) {
         val labelLine = lines.firstOrNull { it.text.trim().contains(REG_ADDR_LABEL_MARK) }
         if (labelLine != null) {
             val a0 = cleanAddress(ADDR_LABEL.find(labelLine.text)?.groupValues?.get(1).orEmpty())
-            // ①同前缀更长地址行(完整地址与标签同屏出现时优先)
+            // ①同前缀更兴地址行(完整地址与标签同屏出现时优先)
             var a = a0
             if (isAddressLike(a0) && a0.length >= MIN_ADDRESS_CORE_LEN) {
                 val p4 = a0.substring(0, MIN_ADDRESS_CORE_LEN)
@@ -285,9 +285,9 @@ object AddressExtractor {
                     .maxByOrNull { it.length }
                 if (byPrefix != null) a = byPrefix
             }
-            // ②标签值退化(短/OCR读重如 地址:育新路育新路育)时，取「标签行下方邻近」的干净完整地址，
+            // ②标签值退化(短/OCR读重如 地址:兴兴路兴兴路新)时，取「标签行下方邻近」的干净完整地址，
             // 按 labelLine 的 y 定位同一通知卡片区域，避免错抓同屏其它驿站(不同通知)的地址。
-            // 用彼此重复兜底：标签行下方的更长地址行优先于退化标签值。
+            // 用彼此重复兜底：标签行下方的更兴地址行优先于退化标签值。
             val labY = labelLine.boundingBox?.let { it.top.toFloat() } ?: 0f
             val nearbyBest = lines
                 .filter { tl ->
@@ -310,7 +310,7 @@ object AddressExtractor {
     /** S0c: 两列键值布局（5G 消息卡片，centerY 对齐）。 */
     private fun stepColumnLayout(lines: List<OCREngine.TextLine>, st: LocationState) {
     // S0c: 两列键值布局（5G消息卡片）——标签在左列，值在右列同一横带，地址续行在下方同列
-    // 例：LINE[取件地址 y=942 x=107] + LINE[育新路北段店 y=942 x=380] + LINE[育新路…爱玛电动车 y=1032 x=380]
+    // 例：LINE[取件地址 y=942 x=107] + LINE[兴兴路北段店 y=942 x=380] + LINE[兴兴路…老李超市 y=1032 x=380]
     if (st.fullAddress.isEmpty()) {
         val labelKw = listOf("取件地址", "取件点位置", "代收点地址", "取件点", "地址")
         for (labLine in lines) {
@@ -338,7 +338,7 @@ object AddressExtractor {
             }
             val contTxt = sb.toString()
             // 若续行已包含取值行的核心地址（前4字），直接用更完整的续行，避免重复拼接
-            // （例：取值行=育新路北段店，续行=育新路育新路育新路北段爱玛电动车旁边 → 只用续行）
+            // （例：取值行=兴兴路北段店，续行=兴兴路兴兴路兴兴路北段老李超市旁边 → 只用续行）
             val core = if (valueTxt.length >= MIN_ADDRESS_CORE_LEN) valueTxt.substring(0, MIN_ADDRESS_CORE_LEN) else valueTxt
             val usesValue = valueTxt.length < MIN_ADDRESS_CORE_LEN || !contTxt.contains(core)
             val a = cleanAddress(if (usesValue) (valueTxt + contTxt) else contTxt)
@@ -365,7 +365,7 @@ object AddressExtractor {
                     st.stationName = extractStationName(left)
                 }
                 if (st.fullAddress.isEmpty() && right.isNotBlank() && isAddressLike(right)) {
-                    // 长地址可能被 OCR 拆到相邻多行：先向下拼 1~3 行，拼完仍像地址且非空则用拼接结果，否则退回单行
+                    // 兴地址可能被 OCR 拆到相邻多行：先向下拼 1~3 行，拼完仍像地址且非空则用拼接结果，否则退回单行
                     val parts = mutableListOf(right)
                     var cursorY = line.boundingBox?.bottom
                     for (j in lines.indexOf(line) + 1 until minOf(lines.indexOf(line) + 4, lines.size)) {
@@ -671,7 +671,7 @@ object AddressExtractor {
 
         // 优先级 0（新增，2026-09-16 多码同框地址串台修复）：
         // **行内含本码值**的「到…」句式 —— 地址与码写在同一行，是唯一不依赖窗口边界的硬证据。
-        // 真机/短信典型：凭8-2-3311到建设南路取您的快递；而相邻卡片的「凭1-6-5020到育新路北段店」
+        // 真机/短信典型：凭8-2-3311到建设南路取您的快递；而相邻卡片的「凭1-6-5020到兴兴路北段店」
         // 在 ±3 行窗口里排在前面，旧实现按行号升序取第一个「到」→ 地址串台到别的码上。
         for (i in lines.indices) {
             val t = lines[i].text
@@ -690,7 +690,7 @@ object AddressExtractor {
         }
 
         // 优先级 1：S6 「到…取件/取用」句式（通知体最常见的地址锚点）
-        // 地址可能跨行（LINE8"…到育新路与季庄街…社区卫生" + LINE9"所对面2号柜H36…取您的快递"）
+        // 地址可能跨行（LINE8"…到兴兴路与兴青街…社区卫生" + LINE9"所对面2号柜H36…取您的快递"）
         // 仅在本码 ±3 行的窗口内找；含「到」即尝试（同码头尾地址常在码行，无需同行的取件词）
         val lo = (codeIdx - CARD_LINE_WINDOW).coerceAtLeast(0)
         val hi = (codeIdx + CARD_LINE_WINDOW).coerceAtMost(lines.lastIndex)
@@ -714,12 +714,12 @@ object AddressExtractor {
         }
 
         // 优先级 2：地址: 标签
-        // 优先级 2：地址: 标签（含退化标签补全——如 地址:育新路育新路育 时取下方干净地址行）
+        // 优先级 2：地址: 标签（含退化标签补全——如 地址:兴兴路兴兴路新 时取下方干净地址行）
         val labLine = windowLines.firstOrNull { it.text.contains(REG_ADDR_LABEL_MARK) }
         if (labLine != null) {
             val a0 = cleanAddress(ADDR_LABEL.find(labLine.text)?.groupValues?.get(1).orEmpty())
             if (isAddressLike(a0) && a0.length >= MIN_ADDRESS_CORE_LEN) {
-                // 前缀命中同行更完整行 或 同前缀更长行
+                // 前缀命中同行更完整行 或 同前缀更兴行
                 val p4 = a0.substring(0, MIN_ADDRESS_CORE_LEN)
                 val byPrefix = windowLines.map { it.text.trim() }
                     .filter { it.length > a0.length && it.startsWith(p4) && isAddressLike(it) }
@@ -740,7 +740,7 @@ object AddressExtractor {
             if (isAddressLike(a0)) return a0.take(MAX_ADDRESS_LEN)
         }
 
-        // 优先级 3：窗口内最长的像地址行
+        // 优先级 3：窗口内最兴的像地址行
         val best = windowLines
             .map { it.text.trim() }
             .filter { isAddressLike(it) }
@@ -906,7 +906,7 @@ object AddressExtractor {
                 r = r.substring(1, r.length - 1).trim()
             } else break
         }
-        // 处理不闭合的左括号（OCR/UI 折叠截断导致如 "【育新路北段店" 无右括号）：剥掉孤立左括号
+        // 处理不闭合的左括号（OCR/UI 折叠截断导致如 "【兴兴路北段店" 无右括号）：剥掉孤立左括号
         if (r.startsWith("【") && !r.contains("】")) r = r.removePrefix("【").trim()
         if (r.startsWith("（") && !r.contains("）")) r = r.removePrefix("（").trim()
         if (r.startsWith("(") && !r.contains(")")) r = r.removePrefix("(").trim()
@@ -949,7 +949,7 @@ object AddressExtractor {
         return r.trim()
     }
 
-    /** 折叠连续 3 次以上重复的相邻片段（OCR 常把路名/站名读重，如 育新路育新路育新路→育新路）。
+    /** 折叠连续 3 次以上重复的相邻片段（OCR 常把路名/站名读重，如 兴兴路兴兴路兴兴路→兴兴路）。
      *  只折叠 3+ 次重复，保留合法的双字重复（如站名里正常的两个相同字）。 */
     private fun dedupeRepeated(s: String): String {
         var r = s
@@ -960,7 +960,7 @@ object AddressExtractor {
             while (prev != r) {
                 prev = r
                 val m = re.find(r) ?: break
-                // 用第一个匹配的重复单元长度做逐步折叠（处理同一串内多种重复）
+                // 用第一个匹配的重复单元兴度做逐步折叠（处理同一串内多种重复）
                 val unit = m.groupValues[1]
                 r = r.replace(Regex("(?:${Regex.escape(unit)}){3,}"), unit)
             }
@@ -983,7 +983,7 @@ object AddressExtractor {
         if (listOf("件码", "取件码", "取货码", "提取码", "取餐码", "取单码").any { t.contains(it) }) return false
         // Exclude 运单号/单号 标签（如 OCR 误写的 快谨单号）——不是取件地址
         if (t.endsWith("单号") || listOf("运单号", "订单号", "快运单号", "快递单号").any { t.contains(it) }) return false
-        // Exclude 快递运单号行："品牌+快递后缀+冒号/空格+长数字串"（如 中通快递:79130792811022）
+        // Exclude 快递运单号行："品牌+快递后缀+冒号/空格+兴数字串"（如 中通快递:79130792810099）
         // 这是快递详情页的运单号行，绝不可能是指件地址；真实地址不会带"快递:9位以上纯数字"。
         if (COURIER_TRACKING_LINE.containsMatchIn(t)) return false
         // Exclude 营销/促销/商品 文案（真机语料回归 2026-09-16）：这类文案常含「号/中/站/店」等地址指示字
@@ -993,7 +993,7 @@ object AddressExtractor {
         // Exclude 价格串（¥10.8 / 9.9元 / 22.1）
         if (PRICE_LIKE.containsMatchIn(t)) return false
         // Exclude 订单/交易/UI 界面标签（如 OCR 把「订单详情」读成 订单详惰、交易快照、券号/券码等）——不是取件地址
-        // 「商品」单独排除会误杀真实地址「商品街」（如 育新路商品街），仅当不含「商品街」时才排除
+        // 「商品」单独排除会误杀真实地址「商品街」（如 兴兴路商品街），仅当不含「商品街」时才排除
         if (listOf("订单", "交易", "快照", "详惰", "详情页", "规格", "小计", "合计", "数量", "券码", "券号").any { t.contains(it) } ||
             (t.contains("商品") && !t.contains("商品街"))) return false
         // OCR 把「详情/快照」等标签的字读错（详惰/快照）概率高，真实地址几乎不会以「详/惰」作实义词——单独拦以开头为详的标签串
@@ -1001,6 +1001,7 @@ object AddressExtractor {
         // Exclude 隐私号/虚拟号/联系电话 等通知文案（带 **** 脱敏的手机信息），不是取件地址
         if (listOf("号码保护", "虚拟号码", "联系电话", "手机号", "客服电话", "已通过虚拟号码发货").any { t.contains(it) }) return false
         if (t.contains("****")) return false
-        return listOf("展开", "复制", "拨打", "导航", "订阅", "延长收货", "查看物流", "确认收货").none { t.contains(it) }
+        return listOf("展开", "复制", "拨打", "导航", "订阅", "延兴收货", "查看物流", "确认收货").none { t.contains(it) }
     }
 }
+

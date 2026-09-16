@@ -5,8 +5,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 /**
- * Regression: 取件码窗口内出现「快递运单号行」（如 中通快递:79130792811022）时，
- * 不得把它当成本码的取件地址——此前 extractAddressForCode 的"窗口最长地址行"兜底
+ * Regression: 取件码窗口内出现「快递运单号行」（如 中通快递:79130792810099）时，
+ * 不得把它当成本码的取件地址——此前 extractAddressForCode 的"窗口最兴地址行"兜底
  * 会误抓该行导致入库地址错误（v1.0.x bug, 2026-08-17 复现于免喜扫码件）。
  */
 class CourierTrackingLineAddrTest {
@@ -15,12 +15,12 @@ class CourierTrackingLineAddrTest {
     private val raw = listOf(
         0 to "该每单免用后付0元下单:宗36%", 1 to "微信支付", 2 to "也AH", 3 to "已扣费¥19.99",
         4 to "中华人民天利E", 5 to "发丽水市", 6 to "取件码4-5-7861",
-        7 to "免喜快递超市代收点|育新路育新路", 8 to "育新路北段愛玛电动车旁边",
-        9 to "中通快递:79130792811022", 10 to "快递员:刘趁义", 11 to "物流服务",
+        7 to "免喜快递超市代收点|兴兴路兴兴路", 8 to "兴兴路北段愛玛电动车旁边",
+        9 to "中通快递:79130792810099", 10 to "快递员:刘趁义", 11 to "物流服务",
         12 to "待取件 2026-08-15 11:22:11", 13 to "订单蝙号: 260813-30887907..2827",
-        14 to "9PUPp", 15 to "快件己送达 [免喜生活-周口郸", 16 to "城育新路北段店,电话..",
+        14 to "9PUPp", 15 to "快件己送达 [免喜生活-新阳郸", 16 to "城兴兴路北段店,电话..",
         17 to "展开ン", 18 to "现在", 19 to "复制", 20 to "拨打电话",
-        21 to "收货地址: 河南省周口市郸城县育新北 展开v", 22 to "复制", 23 to "拔打电话",
+        21 to "收货地址: 河南省新阳市安平县新新北 展开v", 22 to "复制", 23 to "拔打电话",
         24 to "复制", 25 to "订阅提醒"
     )
     private val boxes = mapOf(
@@ -44,15 +44,16 @@ class CourierTrackingLineAddrTest {
         val allText = ls.joinToString(" ") { it.text }
         val loc = AddressExtractor.extractLocation(ls, allText)
         // 全屏地址保持正确
-        assertEquals("河南省周口市郸城县育新北", loc.fullAddress)
+        assertEquals("河南省新阳市安平县新新北", loc.fullAddress)
         // 窗口地址（入库实际生效）落到站点+街道，而不是运单号行
         val per = AddressExtractor.extractAddressForCode(ls, "4-5-7861")
         val eff = AddressExtractor.resolveAddress(ls, allText, per, loc.fullAddress)
-        assertEquals("免喜快递超市代收点|育新路育新路", eff)
+        assertEquals("免喜快递超市代收点|兴兴路兴兴路", eff)
         // 运单号行本身绝不能当成地址
         val m = AddressExtractor::class.java
             .getDeclaredMethod("isAddressLike", String::class.java)
             .apply { isAccessible = true }
-        assertEquals(false, m.invoke(AddressExtractor, "中通快递:79130792811022") as Boolean)
+        assertEquals(false, m.invoke(AddressExtractor, "中通快递:79130792810099") as Boolean)
     }
 }
+

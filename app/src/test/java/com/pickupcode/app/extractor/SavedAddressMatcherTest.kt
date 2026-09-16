@@ -20,12 +20,12 @@ class SavedAddressMatcherTest {
     @Test
     @DisplayName("命中关键词 → 返回完整名称（而不是 OCR 原文）")
     fun keywordHitReturnsFullName() {
-        val saved = listOf(view("育新路北段菜鸟驿站", "北段驿站", "育新路"))
+        val saved = listOf(view("长兴路北段菜鸟驿站", "北段驿站", "长兴路"))
         val r = SavedAddressMatcher.match(
             listOf(line("【通知】北段驿站 您的包裹已到 取件码 1-2-3456 请尽快取件")),
             saved
         )
-        assertEquals("育新路北段菜鸟驿站", r?.fullName, "主页显示的应是完整名称")
+        assertEquals("长兴路北段菜鸟驿站", r?.fullName, "主页显示的应是完整名称")
         assertEquals("北段驿站", r?.key)
     }
 
@@ -41,12 +41,12 @@ class SavedAddressMatcherTest {
     @Test
     @DisplayName("有关键词时，完整名称本身不再参与匹配（按用户模型：关键词才是依据）")
     fun fullNameNotUsedAsKeyWhenKeywordsPresent() {
-        val saved = listOf(view("育新路北段菜鸟驿站", "北段驿站"))
+        val saved = listOf(view("长兴路北段菜鸟驿站", "北段驿站"))
         // 文本里只有完整名称、没有关键词 → 不命中
-        assertNull(SavedAddressMatcher.match(listOf(line("育新路北段菜鸟驿站 取件码 1-1-1111")), saved))
+        assertNull(SavedAddressMatcher.match(listOf(line("长兴路北段菜鸟驿站 取件码 1-1-1111")), saved))
         // 出现关键词 → 命中
         assertEquals(
-            "育新路北段菜鸟驿站",
+            "长兴路北段菜鸟驿站",
             SavedAddressMatcher.match(listOf(line("北段驿站 取件码 1-1-1111")), saved)?.fullName
         )
     }

@@ -17,7 +17,7 @@ class AddressExtractorTest {
     @Test
     @DisplayName("collpases 3+ repeated multi-char CJK unit")
     fun dedupeRepeated_collapsesMultiCharCjk() {
-        assertEquals("育新路北段", invokeDedupeRepeated("育新路育新路育新路北段"))
+        assertEquals("长兴路北段", invokeDedupeRepeated("长兴路长兴路长兴路北段"))
         assertEquals("申通快递", invokeDedupeRepeated("申通快递申通快递申通快递"))
     }
 
@@ -42,7 +42,7 @@ class AddressExtractorTest {
     @Test
     @DisplayName("double repeat preserved (not 3+)")
     fun dedupeRepeated_keepsDoubleRepeat() {
-        assertEquals("育新路路", invokeDedupeRepeated("育新路路"))
+        assertEquals("长兴路路", invokeDedupeRepeated("长兴路路"))
     }
 
     @Test
@@ -54,8 +54,8 @@ class AddressExtractorTest {
     @Test
     @DisplayName("no repetition returns original")
     fun dedupeRepeated_noRepetition() {
-        assertEquals("育新路北段爱玛电动车旁边",
-            invokeDedupeRepeated("育新路北段爱玛电动车旁边"))
+        assertEquals("长兴路北段老李超市旁边",
+            invokeDedupeRepeated("长兴路北段老李超市旁边"))
     }
 
     private fun invokeDedupeRepeated(s: String): String {
@@ -71,33 +71,33 @@ class AddressExtractorTest {
     @Test
     @DisplayName("finds address from 到…取件 pattern (S6)")
     fun extractAddress_afterToPattern() {
-        val text = "凭281849到育新路北段爱玛电动车旁边2号柜取您的快递"
+        val text = "凭281849到长兴路北段老李超市旁边2号柜取您的快递"
         val addr = extract(text)
-        assertTrue(addr.contains("育新路"), "S6 should find address, got: $addr")
+        assertTrue(addr.contains("长兴路"), "S6 should find address, got: $addr")
     }
 
     @Test
     @DisplayName("finds address from 已放至 pattern (S5)")
     fun extractAddress_placedPhrase() {
-        val text = "已放至育新路北段菜鸟驿站，凭码取件"
+        val text = "已放至长兴路北段菜鸟驿站，凭码取件"
         val addr = extract(text)
-        assertTrue(addr.contains("育新路"), "S5 should find address, got: $addr")
+        assertTrue(addr.contains("长兴路"), "S5 should find address, got: $addr")
     }
 
     @Test
     @DisplayName("finds address from explicit label (S0)")
     fun extractAddress_explicitLabel() {
-        val text = "取件地址: 育新路北段爱玛电动车旁边"
+        val text = "取件地址: 长兴路北段老李超市旁边"
         val addr = extract(text)
-        assertTrue(addr.contains("育新路"), "S0 should find address, got: $addr")
+        assertTrue(addr.contains("长兴路"), "S0 should find address, got: $addr")
     }
 
     @Test
     @DisplayName("fallback for line with road indicator (S10)")
     fun extractAddress_s10fallback() {
-        val text = "育新路北段爱玛电动车旁边"
+        val text = "长兴路北段老李超市旁边"
         val addr = extract(text)
-        assertTrue(addr.contains("育新路"), "S10 fallback should find, got: $addr")
+        assertTrue(addr.contains("长兴路"), "S10 fallback should find, got: $addr")
     }
 
     @Test
@@ -184,7 +184,7 @@ class AddressExtractorTest {
     fun resolveAddress_windowAlwaysWins() {
         val ls = parenReproLines()
         val allText = ls.joinToString(" ") { it.text }
-        val addr = AddressExtractor.resolveAddress(ls, allText, "育新路25号", "建设南路", multiCodeOnScreen = false)
-        assertEquals("育新路25号", addr)
+        val addr = AddressExtractor.resolveAddress(ls, allText, "长兴路25号", "建设南路", multiCodeOnScreen = false)
+        assertEquals("长兴路25号", addr)
     }
 }

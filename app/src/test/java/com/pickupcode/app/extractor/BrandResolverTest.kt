@@ -15,17 +15,17 @@ class BrandResolverTest {
     @Test
     @DisplayName("运单号紧贴中文：必须能抓到（\\b 版本会漏）")
     fun orderNumberAdjacentToChinese() {
-        assertEquals("435316307329341", BrandResolver.findOrderNumber("韵达快递435316307329341"))
+        assertEquals("435316307300011", BrandResolver.findOrderNumber("韵达快递435316307300011"))
         assertEquals(
-            "435316307329341",
-            BrandResolver.findOrderNumber("您的包裹已到，韵达快递435316307329341，请及时取件")
+            "435316307300011",
+            BrandResolver.findOrderNumber("您的包裹已到，韵达快递435316307300011，请及时取件")
         )
     }
 
     @Test
     @DisplayName("运单号被中文包裹在中间：也要能抓到")
     fun orderNumberSurroundedByChinese() {
-        assertEquals("79130792811022", BrandResolver.findOrderNumber("【中通快递】单号79130792811022已到驿站"))
+        assertEquals("79130792810099", BrandResolver.findOrderNumber("【中通快递】单号79130792810099已到驿站"))
     }
 
     @Test

@@ -20,16 +20,16 @@ class HomeGroupingTest {
     @DisplayName("按地址聚合：码多的地址排前，空地址归末尾")
     fun group_by_address_order() {
         val items = listOf(
-            item(1, "育新路3号柜"),
+            item(1, "长兴路3号柜"),
             item(2, ""),                  // 空地址
-            item(3, "李庄街快递柜"),
-            item(4, "育新路3号柜"),
-            item(5, "李庄街快递柜"),
-            item(6, "李庄街快递柜")
+            item(3, "长青街快递柜"),
+            item(4, "长兴路3号柜"),
+            item(5, "长青街快递柜"),
+            item(6, "长青街快递柜")
         )
         val groups = HomeGrouping.byAddress(items)
-        // 李庄街快递柜(3) > 育新路3号柜(2) > ""(1)
-        assertEquals(listOf("李庄街快递柜", "育新路3号柜", ""), groups.map { it.first })
+        // 长青街快递柜(3) > 长兴路3号柜(2) > ""(1)
+        assertEquals(listOf("长青街快递柜", "长兴路3号柜", ""), groups.map { it.first })
         assertEquals(3, groups[0].second.size)
         assertEquals(2, groups[1].second.size)
         assertEquals(1, groups[2].second.size)

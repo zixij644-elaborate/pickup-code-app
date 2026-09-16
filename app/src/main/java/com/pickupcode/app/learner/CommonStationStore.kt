@@ -29,7 +29,7 @@ object CommonStationStore {
     /** 从取件地址/站名/原文里抠候选站点名：优先取「xx驿站/xx快递柜/xx店/xx代收点/xx柜」这类站名片段。 */
     private fun extractStationName(text: String): String? {
         if (text.isBlank()) return null
-        // 常见站点后缀 → 剥出前面的站名（如 育新路北段菜鸟驿站 → 育新路北段菜鸟驿站）
+        // 常见站点后缀 → 剥出前面的站名（如 长兴路北段菜鸟驿站 → 长兴路北段菜鸟驿站）
         val suffixes = listOf("菜鸟驿站", "妈妈驿站", "兔喜生活", "快递柜", "丰巢", "代收点", "自提点", "服务站", "驿站")
         for (sfx in suffixes) {
             val idx = text.indexOf(sfx)

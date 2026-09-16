@@ -29,7 +29,7 @@ class CodeCardWindowTest {
         val lines = listOf(
             line("其他通知", 100),
             line("取件码 1-2-3456", 200),
-            line("育新路北段菜鸟驿站", 240),
+            line("长兴路北段菜鸟驿站", 240),
             line("请及时取件", 280)
         )
         assertTrue(AddressExtractor.isLineInCodeWindow(lines, "1-2-3456", 2), "下方紧邻行应属本卡")

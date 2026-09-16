@@ -277,14 +277,14 @@ private fun SavedAddressEditorDialog(
                     value = fullName,
                     onValueChange = { fullName = it },
                     label = { Text("完整名称（识别到后就用它）") },
-                    placeholder = { Text("如：育新路北段菜鸟驿站") },
+                    placeholder = { Text("如：长兴路北段菜鸟驿站") },
                     singleLine = true
                 )
                 OutlinedTextField(
                     value = keywords,
                     onValueChange = { keywords = it },
                     label = { Text("关键词，逗号分隔（命中任一即触发）") },
-                    placeholder = { Text("如：北段驿站,育新路") },
+                    placeholder = { Text("如：北段驿站,长兴路") },
                     singleLine = true
                 )
                 Text(
