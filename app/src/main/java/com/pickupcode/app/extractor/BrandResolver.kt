@@ -43,11 +43,25 @@ object BrandResolver {
         // 卤味/鸡排等小吃连锁
         "正新鸡排", "正新", "绝味", "绝味鸭脖", "煌上煌", "紫燕百味鸡", "周黑鸭"
     )
-    private val COURIER_BRANDS = listOf(
-        "京东快递", "顺丰", "中通", "圆通", "申通", "韵达", "极兔",
-        "邮政快递", "邮政", "菜鸟", "丰巢", "妈妈驿站", "兔喜",
-        "免喜", "韵达超市", "欢猫智柜"
+    /**
+     * 快递公司（承运商）——品牌归属的**高优先级**档。
+     * 用户 2026-09-16 明确要求：同屏/同卡同时出现"快递公司"和"取件点/柜"时，**显示快递公司**
+     * （卡片的地址行已经写了取件点，来源再写取件点就重复了）。
+     */
+    private val COURIER_COMPANIES = listOf(
+        "京东快递", "京东物流", "顺丰", "中通", "圆通", "申通", "韵达", "极兔",
+        "邮政快递", "邮政", "德邦"
+        // 注：不列 "EMS" —— 同一条通知里常混着别的包裹的"邮政EMS:单号"行，
+        // 而"取运单号前最近品牌"规则会把它误当本码承运商（真机案例 D-06003 韵达 → EMS）。
+        // 真 EMS 单号仍由 extractBrandViaOrderNum 的字母前缀（EA…CN）判定为 EMS。
     )
+
+    /** 取件点/柜（站点方）——**低优先级**档：只有本卡/全屏都没有快递公司信息时才用。 */
+    private val PICKUP_POINTS = listOf(
+        "菜鸟", "丰巢", "妈妈驿站", "兔喜", "免喜", "韵达超市", "欢猫智柜"
+    )
+
+    private val COURIER_BRANDS = COURIER_COMPANIES + PICKUP_POINTS
 
     // M11: 品牌+后缀正则一次性预编译（品牌固定，避免热循环里每个品牌每次调用都重新编译 Regex）
     private val FOOD_SUFFIXES = listOf("取餐", "外卖", "咖啡", "茶饮", "奶茶", "饮品", "点单", "鲜果", "门店")
@@ -55,12 +69,18 @@ object BrandResolver {
     private val FOOD_BRAND_SUFFIX_REGEX: List<Pair<String, Regex>> =
         FOOD_BRAND_KEYWORDS.map { it to Regex(Regex.escape(it) + "(?:" + FOOD_SUFFIXES.joinToString("|") { Regex.escape(it) } + ")", RegexOption.IGNORE_CASE) }
     private val COURIER_BRAND_SUFFIX_REGEX: List<Pair<String, Regex>> =
-        COURIER_BRANDS.map { it to Regex(Regex.escape(it) + "(?:" + COURIER_SUFFIXES.joinToString("|") { Regex.escape(it) } + ")") }
+        COURIER_COMPANIES.map { it to Regex(Regex.escape(it) + "(?:" + COURIER_SUFFIXES.joinToString("|") { Regex.escape(it) } + ")") }
+    private val PICKUP_POINT_SUFFIX_REGEX: List<Pair<String, Regex>> =
+        PICKUP_POINTS.map { it to Regex(Regex.escape(it) + "(?:" + COURIER_SUFFIXES.joinToString("|") { Regex.escape(it) } + ")") }
+
+    /** 快递公司优先的完整后缀表（含取件点兜底）。 */
+    private val COURIER_FIRST_SUFFIX_REGEX: List<Pair<String, Regex>> =
+        COURIER_BRAND_SUFFIX_REGEX + PICKUP_POINT_SUFFIX_REGEX
 
     // Order/tracking number patterns (used for brand positioning)
     // 允许尾缀 CN：RA/EMS 单号（如 RA123456789CN、EA123456789CN）此前因尾缀 CN 无法命中 \b 而被漏抓
     // ⚠️ 不能用 \b：Android(ICU) 把中文当词字符，而真实通知里运单号几乎总紧贴中文
-    // （如「韵达快递435316307329341」），\b 不成立 → 品牌判定退化、快递100 反查链路静默失效。
+    // （如「韵达快递435316307300011」），\b 不成立 → 品牌判定退化、快递100 反查链路静默失效。
     // 统一用环视边界（本文件与 PatternLearner 保持同一写法）。
     private val COURIER_ORDER_NUM = Regex(
         """(?<![\dA-Za-z])(?:[A-Z]{2,3}\d{8,14}(?:CN)?|RA\d{9,13}CN|\d{13,15}|\d{2,4}-\d{3,5}-\d{4,6})(?![\dA-Za-z])"""
@@ -90,7 +110,8 @@ object BrandResolver {
         }
         for (content in bracketOnLine) {
             FOOD_BRAND_KEYWORDS.firstOrNull { content.contains(it, ignoreCase = true) }?.let { return it }
-            COURIER_BRANDS.firstOrNull { content.contains(it) }?.let { return it }
+            COURIER_COMPANIES.firstOrNull { content.contains(it) }?.let { return it }
+            PICKUP_POINTS.firstOrNull { content.contains(it) }?.let { return it }
         }
 
         // --- 局部窗口：码值所在卡片的行 ---
@@ -107,9 +128,17 @@ object BrandResolver {
         }
 
         // --- S2-local: 本行 / ±3 行的「品牌+后缀」---
-        val brands = if (isFoodHint) FOOD_BRAND_KEYWORDS else COURIER_BRANDS
+        // 用户要求显示快递公司：这里按「餐饮品牌 → 快递公司 → 取件点」的顺序扫描，
+        // 同一行/同一卡片里既有「欢猫智柜快递柜」又有「极兔速递」时，取快递公司。
+        // 用户要求显示快递公司：品牌词扫描顺序 = 餐饮品牌（餐饮场景）/ 快递公司 → 取件点，
+        // 同一卡片里既有「欢猫智柜」又有「极兔」时取快递公司；档内按长度降序（长品牌优先）。
+        val brands: List<String> = if (isFoodHint) {
+            FOOD_BRAND_KEYWORDS.sortedByDescending { it.length }
+        } else {
+            COURIER_COMPANIES.sortedByDescending { it.length } + PICKUP_POINTS.sortedByDescending { it.length }
+        }
         val ignoreCase = isFoodHint
-        val brandSuffixRegex = if (isFoodHint) FOOD_BRAND_SUFFIX_REGEX else COURIER_BRAND_SUFFIX_REGEX
+        val brandSuffixRegex = if (isFoodHint) FOOD_BRAND_SUFFIX_REGEX else COURIER_FIRST_SUFFIX_REGEX
 
         fun brandWithSuffix(text: String): String? {
             // M11: 用预编译正则，避免每次调用逐品牌重新编译
@@ -125,10 +154,10 @@ object BrandResolver {
             brandWithSuffix(neighbor.text)?.let { return it }
         }
 
-        // --- S3-local: 本卡片内出现的品牌词（按长度降序，长品牌优先）---
+        // --- S3-local: 本卡片内出现的品牌词（快递公司优先，档内按长度降序）---
         if (localLines.isNotEmpty()) {
             val localText = localLines.joinToString(" ") { it.text }
-            for (brand in brands.sortedByDescending { it.length }) {
+            for (brand in brands) {
                 if (localText.contains(brand, ignoreCase)) return brand
             }
         }
@@ -139,12 +168,14 @@ object BrandResolver {
             extractBrandViaOrderNum(allText, allLines)?.let { return it }
         }
 
-        // G2: Bracket brand validation
+        // G2: Bracket brand validation（快递公司优先于取件点）
         BRACKET_BRAND.find(allText)?.let { m ->
             val content = m.groupValues[1].trim()
             FOOD_BRAND_KEYWORDS.firstOrNull { content.contains(it, ignoreCase = true) }
                 ?.let { return it }
-            COURIER_BRANDS.firstOrNull { content.contains(it) }
+            COURIER_COMPANIES.firstOrNull { content.contains(it) }
+                ?.let { return it }
+            PICKUP_POINTS.firstOrNull { content.contains(it) }
                 ?.let { return it }
         }
 
@@ -204,9 +235,10 @@ object BrandResolver {
         val prefixBrand = orderNumPrefixToBrand(orderNum)
 
         // S1b: Find the last brand mention before the order number in OCR text
+        // 只看快递公司：这一步的目的是"这单是谁承运的"，取件点/柜品牌（兔喜/欢猫智柜）不参与。
         var textBrand: String? = null
         var bestPos = -1
-        for (brand in COURIER_BRANDS.sortedByDescending { it.length }) {
+        for (brand in COURIER_COMPANIES.sortedByDescending { it.length }) {
             val idx = textBefore.lastIndexOf(brand)
             if (idx > bestPos) {
                 bestPos = idx
