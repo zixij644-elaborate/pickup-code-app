@@ -519,13 +519,24 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         val hasCoupon = collectCouponResults(coupons, settings, allResults, codeSources)
 
         // ② 识别到券码后互斥：不再做取餐码/取件码的识别与标注
-        val aiDeferred = startAiExtract(allText, settings, hasCoupon)
+        // AI 图片通道：在截图被回收之前把整张图压成 base64（用户要求「发给 AI 的是照片」）；
+        // 压缩放到 Default 调度器，避免占用识别主线程。
+        val aiImage = if (settings.enableAI && settings.enableAiImage) {
+            withContext(Dispatchers.Default) {
+                bmp?.let { com.pickupcode.app.util.ImageUtils.toBase64JpegForAi(it) }
+            }
+        } else null
+        val aiBudgetMs = if (aiImage != null) 25_000L else 8_000L
+        // AI 读到的地址/柜号：code → 值，稍后交给管線在本地取不到时填空
+        val aiAddressHints = mutableMapOf<String, String>()
+        val aiCabinetHints = mutableMapOf<String, String>()
+        val aiDeferred = startAiExtract(allText, settings, hasCoupon, aiImage)
 
         // ③ 正则识别（无券码时运行）
         if (!hasCoupon) collectRegexResults(ocrLines, settings, allResults, codeSources)
 
         // ④ 合并 AI 结果：与正则同码同 type 直接去重；不同 type 才留给下方冲突提示（问题2）
-        val aiErr = mergeAiResults(aiDeferred, settings, allResults, codeSources)
+        val aiErr = mergeAiResults(aiDeferred, settings, allResults, codeSources, aiBudgetMs, aiAddressHints, aiCabinetHints)
 
         // Extract address (parcel scenario)
         val address = AddressExtractor.extractAddressFromStores(this, ocrLines, allText)
@@ -554,6 +565,8 @@ class PickupCodeAccessibilityService : AccessibilityService() {
             fullAddress = address,
             rawSnippet = allText,
             screenshotPath = screenshotPath,
+            aiAddressHints = aiAddressHints,
+            aiCabinetHints = aiCabinetHints,
             repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
         )
         // 通知：同码已存在(existed) → 重复提示；否则正常通知。与短信路径统一，避免重复截图时同码常驻通知堆叠。
@@ -596,13 +609,41 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         return hasCoupon
     }
 
-    /** ② 有券码 / 未启用 AI / 无 API Key 时返回 null（此时 AI 不会运行）。 */
-    private fun startAiExtract(allText: String, settings: AppPreferences.Settings, hasCoupon: Boolean): Deferred<AIExtractor.AIExtractResult>? {
-        return if (!hasCoupon && settings.enableAI && settings.apiKey.isNotBlank()) {
-            scope.async(Dispatchers.IO) {
+    /** ② 有券码 / 未启用 AI / 无 API Key 时返回 null（此时 AI 不会运行）。[aiImageBase64] 非空则走视觉通道。 */
+    private fun startAiExtract(
+        allText: String,
+        settings: AppPreferences.Settings,
+        hasCoupon: Boolean,
+        aiImageBase64: String? = null
+    ): Deferred<AIExtractor.AIExtractResult>? {
+        // 诊断：把"AI 为什么没跑"写到 Info 级（不含 PII），用户/开发者无需 Debug 包也能排查
+        if (hasCoupon) {
+            Log.i(TAG, "本屏检测到券码，按设计跳过 AI 识别")
+            return null
+        }
+        if (!settings.enableAI) {
+            Log.i(TAG, "AI 识别未运行：设置里「启用 AI 识别」为关闭")
+            return null
+        }
+        if (settings.apiKey.isBlank()) {
+            Log.i(TAG, "AI 识别未运行：已开启开关但读不到 API Key（AndroidKeyStore 密钥丢失时需重新录入）")
+            return null
+        }
+        val image = aiImageBase64?.takeIf { it.isNotBlank() && settings.enableAiImage }
+        Log.i(TAG, "AI 启动：通道=${if (image != null) "图片" else "文本"}，图片体积≈${(image?.length ?: 0) / 1024}KB(base64)")
+        return scope.async(Dispatchers.IO) {
+            if (image != null) {
+                AIExtractor.extractFromImage(
+                    imageBase64 = image,
+                    apiKey = settings.apiKey,
+                    apiBaseUrl = settings.apiBaseUrl,
+                    model = settings.apiModel,
+                    fallbackText = allText
+                )
+            } else {
                 AIExtractor.extract(allText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
             }
-        } else null
+        }
     }
 
     /** ③ 正则识别：按置信度阈值与类型开关过滤后追加到 allResults。 */
@@ -621,22 +662,29 @@ class PickupCodeAccessibilityService : AccessibilityService() {
     /** ④ 合并 AI 结果：同码同 type 已有（正则或其它 AI 项）→ 跳过；否则加入。返回 aiErr（失败原因，供空结果提示用）。 */
     private suspend fun mergeAiResults(aiDeferred: Deferred<AIExtractor.AIExtractResult>?, settings: AppPreferences.Settings,
                                        allResults: MutableList<Pair<String, CodeExtractor.CodeType>>,
-                                       codeSources: MutableMap<String, String>): String? {
+                                       codeSources: MutableMap<String, String>,
+                                       budgetMs: Long = 8_000L,
+                                       aiAddressHints: MutableMap<String, String> = mutableMapOf(),
+                                       aiCabinetHints: MutableMap<String, String> = mutableMapOf()): String? {
         var aiErr: String? = null
         if (aiDeferred != null) {
             try {
-                // 与短信/分享路径对齐：AI 最多等 8s，超时仅用正则结果，不拖死落库/通知
-                val aiRes = kotlinx.coroutines.withTimeoutOrNull(8_000L) { aiDeferred.await() }
+                // 与短信/分享路径对齐：AI 最多等预算时长，超时仅用正则结果，不拖死落库/通知
+                val aiRes = kotlinx.coroutines.withTimeoutOrNull(budgetMs) { aiDeferred.await() }
                 if (aiRes == null) {
                     aiDeferred.cancel()
-                    Log.d(TAG, "AI 超时未返回（预算 8000ms），仅用正则结果")
+                    Log.d(TAG, "AI 超时未返回（预算 ${budgetMs}ms），仅用正则结果")
                     return "AI服务超时"
                 }
                 aiErr = aiRes.error
                 if (aiRes.error != null) {
                     Log.w(TAG, "AI 识别失败: ${aiRes.error}")
                 }
+                Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（图片通道=${aiRes.usedImage}）")
                 for (ai in aiRes.results) {
+                    // AI 给出的地址/柜号：先登记（即使该码已被正则识别，也能用来补空地址）
+                    ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
+                    ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
                     if (!isTypeEnabled(ai.type, settings)) continue
                     val alreadySame = allResults.any { it.first == ai.code && it.second == ai.type }
                     if (alreadySame) continue
@@ -695,19 +743,8 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         return true
     }
 
-    /** AI 错误原文 → 用户可读类别文案（不进通知的原始细节只写日志）。 */
-    private fun categorizeAiError(err: String): String {
-        val e = err.lowercase()
-        return when {
-            e.contains("timeout") || e.contains("timed out") || e.contains("超时") -> "AI服务超时"
-            e.contains("401") || e.contains("unauthorized") || e.contains("api key") || e.contains("invalid key") -> "AI密钥无效"
-            e.contains("429") || e.contains("rate limit") || e.contains("too many") -> "AI请求过于频繁"
-            e.contains("404") || e.contains("model") -> "AI模型不可用"
-            e.contains("connect") || e.contains("network") || e.contains("socket") ||
-                e.contains("unreachable") || e.contains("refused") || e.contains("resolve") -> "网络连接失败"
-            else -> "AI识别失败"
-        }
-    }
+    /** AI 错误原文 → 用户可读类别文案（原始细节只写日志；归类实现统一在 [AIExtractor.categorizeError]）。 */
+    private fun categorizeAiError(err: String): String = AIExtractor.categorizeError(err)
 
     /** ⑥ 冲突检测：同码同时匹配取餐/取件类型时返回该码（提示用户确认）。 */
     private fun detectConflicts(allResults: List<Pair<String, CodeExtractor.CodeType>>): List<String> {

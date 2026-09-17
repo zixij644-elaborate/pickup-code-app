@@ -309,6 +309,17 @@ object ShareReceiver {
             return
         }
 
+        // AI 图片通道：必须在 recycle 之前把图压成 base64（用户要求「发给 AI 的是照片」）。
+        // 只有 AI 已启用且「AI 读取图片」开着时才压，避免白耗 CPU。
+        val aiImage: String? = run {
+            val st = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }
+            if (st.enableAI && st.enableAiImage) {
+                withContext(Dispatchers.IO) { ImageUtils.toBase64JpegForAi(bitmap) }
+            } else {
+                null
+            }
+        }
+
         // 识别到结果才保存共享图片（详情页截图用）
         val screenshotPath = try {
             withContext(Dispatchers.IO) {
@@ -321,7 +332,7 @@ object ShareReceiver {
         val allText = lines.joinToString(" ") { it.text }
         val address = AddressExtractor.extractAddressFromStores(context, lines, allText)
         val snippet = "$sourceLabel | ${lines.joinToString(" ") { it.text }}"
-        extractAndNotify(context, lines, snippet, screenshotPath, address, scope, coupons, shareSource)
+        extractAndNotify(context, lines, snippet, screenshotPath, address, scope, coupons, shareSource, aiImage)
     }
 
     private suspend fun extractAndNotify(
@@ -332,7 +343,8 @@ object ShareReceiver {
         address: String = "",
         scope: CoroutineScope,
         coupons: List<CouponDetector.CouponResult> = emptyList(),
-        shareSource: ShareSource? = null
+        shareSource: ShareSource? = null,
+        aiImageBase64: String? = null
     ) {
         val shareSourcePkg = shareSource?.pkg ?: ""
         val shareSourceName = shareSource?.name ?: ""
@@ -348,6 +360,9 @@ object ShareReceiver {
         val db = AppDatabase.getInstance(context)
         val settings = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }
         val allResults = mutableListOf<CodeExtractor.ExtractedCode>()
+        // AI（视觉通道）读到的地址/柜号：code → 值，稍后交给管線在本地取不到时填空
+        val aiAddressHints = mutableMapOf<String, String>()
+        val aiCabinetHints = mutableMapOf<String, String>()
 
         // 券码：检测到二维码/条码并解码，code = 解码内容；不需要正则
         var hasCoupon = false
@@ -390,27 +405,62 @@ object ShareReceiver {
                 }
             }
 
-            // AI 补识别：与短信路径对齐，设超时预算，超时仅用正则结果，绝不拖死落库/通知
+            // AI 补识别：与短信路径对齐，设超时预算，超时仅用正则结果，绝不拖死落库/通知。
+            // 图片通道（用户要求"发给 AI 的是照片"）：把整张图交给视觉模型，它直接读图并给出
+            // 码值/品牌/地址；图片比文本慢，预算放宽到 25s；模型不支持图片时内部自动回退文本。
             if (settings.enableAI && settings.apiKey.isNotBlank()) {
-                val aiRes = kotlinx.coroutines.withTimeoutOrNull(8_000L) {
-                    AIExtractor.extract(allText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
+                val imageMode = !aiImageBase64.isNullOrBlank()
+                val budget = if (imageMode) 25_000L else 8_000L
+                val aiRes = kotlinx.coroutines.withTimeoutOrNull(budget) {
+                    if (imageMode) {
+                        AIExtractor.extractFromImage(
+                            imageBase64 = aiImageBase64!!,
+                            apiKey = settings.apiKey,
+                            apiBaseUrl = settings.apiBaseUrl,
+                            model = settings.apiModel,
+                            fallbackText = allText
+                        )
+                    } else {
+                        AIExtractor.extract(allText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
+                    }
                 }
                 if (aiRes != null) {
-                    if (aiRes.error != null) Log.w(TAG, "AI 识别失败: ${aiRes.error}")
-                    if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "AI 识别返回 ${aiRes.results.size} 条: " +
-                            aiRes.results.joinToString { "${it.code}(${it.type})" })
+                    if (aiRes.error != null) {
+                        Log.w(TAG, "AI 识别失败: ${aiRes.error}")
+                        // 诊断（2026-09-16）：分享是用户主动操作，失败必须让用户看见，
+                        // 否则"配了 Key 却没作用"完全无从判断。原始细节仍只写日志。
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            android.widget.Toast.makeText(
+                                context,
+                                "AI 未参与识别：${AIExtractor.categorizeError(aiRes.error)}",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
                     }
+                    Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（图片通道=${aiRes.usedImage}）" +
+                        (if (BuildConfig.DEBUG) ": " + aiRes.results.joinToString { "${it.code}(${it.type})@${it.address}" } else ""))
                     for (ai in aiRes.results) {
+                        // AI 给出的地址/柜号：无论最终是否新增码都要登记，供管线在本地取不到时填空
+                        ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
+                        ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
                         if (isTypeDisabled(ai.type, settings)) continue
                         if (allResults.any { it.code == ai.code && it.type == ai.type }) continue // 同码同type去重
                         allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
                     }
                 } else {
-                    Log.d(TAG, "AI 超时未返回（预算 8000ms），仅用正则结果")
+                    Log.w(TAG, "AI 超时未返回（预算 ${budget}ms，图片通道=$imageMode），仅用正则结果")
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(
+                            context,
+                            "AI 未参与识别：AI服务超时（${budget / 1000} 秒）",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             } else {
-                Log.d(TAG, "AI 识别未启用（enableAI=${settings.enableAI}, apiKey非空=${settings.apiKey.isNotBlank()}），跳过")
+                // 诊断：把"为什么没跑"写到 Info 级（不含 PII）
+                Log.i(TAG, "AI 识别未运行：enableAI=${settings.enableAI}, " +
+                    if (settings.apiKey.isBlank()) "读不到 API Key（可能是 AndroidKeyStore 密钥丢失，需重新录入）" else "apiKey 已配置")
             }
         }
 
@@ -431,6 +481,8 @@ object ShareReceiver {
             screenshotPath = screenshotPath,
             shareSourcePkg = shareSourcePkg,
             shareSourceName = shareSourceName,
+            aiAddressHints = aiAddressHints,
+            aiCabinetHints = aiCabinetHints,
             repo = db.repository
         )
         // 通知（同码同 type 已存在 → 重复提示；否则正常通知）

@@ -41,6 +41,8 @@ object RecognitionPipeline {
      * @param screenshotPath 截图路径（短信路径为空串）
      * @param shareSourcePkg/Name 分享来源（短信/无障碍为空串）
      * @param timestamp 入库时间戳
+     * @param aiAddressHints AI（视觉通道）给出的 code→地址/站点，仅在本地管线**拿不到地址**时采用
+     * @param aiCabinetHints AI 给出的 code→柜号，仅在本地取不到柜号时采用
      * @return 保存的码列表（供通知分发 / Kuaidi100 回填等后续使用）
      */
     suspend fun finalize(
@@ -55,6 +57,8 @@ object RecognitionPipeline {
         shareSourcePkg: String = "",
         shareSourceName: String = "",
         timestamp: Long = System.currentTimeMillis(),
+        aiAddressHints: Map<String, String> = emptyMap(),
+        aiCabinetHints: Map<String, String> = emptyMap(),
         repo: CodeRepository
     ): List<SavedCode> {
         // 🔒 兜底：身份码/出库码页面一律不入库（截图拒采在无障碍路径已做，这里防其它入口漏网）
@@ -89,17 +93,32 @@ object RecognitionPipeline {
             // 地址优先级：预存命中的完整名称 > 逐码窗口地址 > 仲裁后的全屏兜底
             // 多码同屏时，预存地址只作用于"命中关键词那一行所属的码"，避免一条地址套到所有码上。
             val perCodeAddr = AddressExtractor.extractAddressForCode(lines, code)
-            val effAddr = if (savedMatch != null &&
+            val savedAddr = if (savedMatch != null &&
                 (!multiCode || AddressExtractor.isLineInCodeWindow(lines, code, savedMatch.lineIndex))
             ) {
                 savedMatch.fullName
             } else {
-                perCodeAddr.ifBlank { fallbackAddr }
+                ""
             }
-            // 独立柜号（仅取件码）
+            val localAddr = perCodeAddr.ifBlank { fallbackAddr }
+            // 地址优先级（2026-09-17 调整）：**预存完整名称 > AI 视觉读图结果 > 本地窗口 > 全屏兜底**。
+            // 为什么把 AI 抬到本地启发式之上：用户要的就是"让 AI 读照片里的地址"。
+            // 真机对比（菜鸟「运单号后五位」那张截图）：本地 S0-label 抽出的是一段 OCR 噪声，
+            // 而视觉模型读出的驿站全称明显正确。预存地址仍排第一 —— 那是用户亲手录的权威值。
+            val aiAddr = aiAddressHints[code].orEmpty()
+            val effAddr = savedAddr.ifBlank { aiAddr.ifBlank { localAddr } }
+            if (effAddr.isNotBlank()) {
+                val from = when {
+                    savedAddr.isNotBlank() -> "预存地址"
+                    aiAddr.isNotBlank() -> "AI读图"
+                    else -> "本地"
+                }
+                Log.d("RecognitionPipeline", "地址来源=$from：$code @ $effAddr")
+            }
+            // 独立柜号（仅取件码）；本地取不到时用 AI 的
             val cabinet = if (type == CodeExtractor.CodeType.pickup_parcel) {
                 if (cabinetCache == null) cabinetCache = AddressExtractor.extractCabinetNumber(lines, allText)
-                cabinetCache!!
+                cabinetCache!!.ifBlank { aiCabinetHints[code].orEmpty() }
             } else ""
 
             // 到期时刻（v6）：快递码算提醒时刻；取餐/券码恒为 0 不提醒

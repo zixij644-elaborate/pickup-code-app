@@ -61,6 +61,13 @@ object AppPreferences {
     /** 是否启用 AI 增强识别（与正则并行，失败不影响主流程）。 */
     private val KEY_ENABLE_AI = booleanPreferencesKey("enable_ai")
 
+    /**
+     * AI 是否直接读**图片**（视觉通道）：开启后把整张截图压缩成 base64 发给模型，
+     * 让模型自己读图上的文字并给出码值/品牌/地址；关闭则只发本地 OCR 文本。
+     * 默认开启（用户 2026-09-17 明确要求"发给 AI 的是照片"）；关掉可减少上传体积与隐私面。
+     */
+    private val KEY_ENABLE_AI_IMAGE = booleanPreferencesKey("enable_ai_image")
+
     /** 是否接收外部分享（ACTION_SEND：分享面板入口）。 */
     private val KEY_ENABLE_INTENT_RECEIVE = booleanPreferencesKey("enable_intent_receive")
 
@@ -101,6 +108,7 @@ object AppPreferences {
         val apiBaseUrl: String = "https://api.openai.com/v1",
         val apiModel: String = "gpt-4o-mini",
         val enableAI: Boolean = false,  // 默认关闭：避免配置 Key 后静默外发 OCR/短信全文；用户显式开启
+        val enableAiImage: Boolean = true,  // AI 启用后默认走"图片直传"（用户要求：让 AI 读照片）；关掉则只发本地 OCR 文本
         val enableIntentReceive: Boolean = true,
         val enableShareDetection: Boolean = true,
         val enableMapVerify: Boolean = false,
@@ -126,6 +134,7 @@ object AppPreferences {
                 apiBaseUrl = prefs[KEY_API_BASE_URL] ?: "https://api.openai.com/v1",
                 apiModel = prefs[KEY_API_MODEL] ?: "gpt-4o-mini",
                 enableAI = prefs[KEY_ENABLE_AI] ?: false,
+                enableAiImage = prefs[KEY_ENABLE_AI_IMAGE] ?: true,
                 enableIntentReceive = prefs[KEY_ENABLE_INTENT_RECEIVE] ?: true,
                 enableShareDetection = prefs[KEY_ENABLE_SHARE_DETECTION] ?: true,
                 enableMapVerify = prefs[KEY_ENABLE_MAP_VERIFY] ?: false,
@@ -183,6 +192,9 @@ object AppPreferences {
 
     suspend fun setEnableAI(context: Context, value: Boolean) =
         write(context, KEY_ENABLE_AI, value)
+
+    suspend fun setEnableAiImage(context: Context, value: Boolean) =
+        write(context, KEY_ENABLE_AI_IMAGE, value)
 
     suspend fun setEnableIntentReceive(context: Context, value: Boolean) =
         write(context, KEY_ENABLE_INTENT_RECEIVE, value)

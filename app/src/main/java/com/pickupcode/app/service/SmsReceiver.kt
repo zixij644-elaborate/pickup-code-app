@@ -96,6 +96,10 @@ class SmsReceiver : BroadcastReceiver() {
                     // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 5-3858）由 AI 补上。
                     // 广播限时 8s——AI 只等「剩余预算」：正则没结果时多等一会（AI 是唯一希望），
                     // 有结果时少等；超时/失败直接用正则结果，绝不拖死短信识别。
+                    // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 5-3858）由 AI 补上。
+                    // 短信没有图片，只能走文本通道；AI 返回的地址/柜号同样用于后续填空。
+                    val aiAddressHints = mutableMapOf<String, String>()
+                    val aiCabinetHints = mutableMapOf<String, String>()
                     if (settings.enableAI && settings.apiKey.isNotBlank()) {
                         val elapsed = System.currentTimeMillis() - startMs
                         val budget = (8000L - elapsed - 1500L).coerceIn(1500L, 6000L)
@@ -104,11 +108,10 @@ class SmsReceiver : BroadcastReceiver() {
                         }
                         if (aiRes != null) {
                             if (aiRes.error != null) Log.w(TAG, "AI 识别失败: ${aiRes.error}")
-                            if (BuildConfig.DEBUG) {
-                                Log.d(TAG, "AI 识别返回 ${aiRes.results.size} 条: " +
-                                    aiRes.results.joinToString { "${it.code}(${it.type})" })
-                            }
+                            Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（文本通道）")
                             for (ai in aiRes.results) {
+                                ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
+                                ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
                                 if (!isTypeEnabled(ai.type, settings)) continue
                                 if (allResults.any { it.code == ai.code && it.type == ai.type }) continue
                                 allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
@@ -116,8 +119,9 @@ class SmsReceiver : BroadcastReceiver() {
                         } else {
                             Log.d(TAG, "AI 超时未返回（预算 ${budget}ms），仅用正则结果")
                         }
-                    } else if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "AI 识别未启用（enableAI=${settings.enableAI}, apiKey非空=${settings.apiKey.isNotBlank()}），跳过")
+                    } else {
+                        Log.i(TAG, "AI 识别未运行（短信路径）：enableAI=${settings.enableAI}, " +
+                            if (settings.apiKey.isBlank()) "读不到 API Key" else "apiKey 已配置")
                     }
 
                     if (allResults.isEmpty()) {
@@ -139,6 +143,8 @@ class SmsReceiver : BroadcastReceiver() {
                         fullAddress = fullAddress,
                         rawSnippet = rawSnippet,
                         timestamp = now,
+                        aiAddressHints = aiAddressHints,
+                        aiCabinetHints = aiCabinetHints,
                         repo = repo
                     )
                     for (s in saved) {

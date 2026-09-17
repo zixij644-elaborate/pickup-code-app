@@ -477,6 +477,12 @@ private fun LearningStatsSection(sc: SettingsCtx, onStatsClick: () -> Unit) {
 
 @Composable
 private fun VerifyServicesSection(sc: SettingsCtx) {
+    // 「测试 AI 连接」的自检状态（诊断用：把"配了 Key 却没作用"变成一条能看懂的结果）
+    var probing by remember { mutableStateOf(false) }
+    var probeText by remember { mutableStateOf<String?>(null) }
+    var probeOk by remember { mutableStateOf(false) }
+    val uiScope = rememberCoroutineScope()
+
     SettingsSectionCard(title = "辅助验证", subtitle = "第三方服务验证 OCR 结果（需联网，可选）") {
         SettingsSubHeader("🗺️ 地图验证")
         SettingsSwitch(
@@ -535,6 +541,93 @@ private fun VerifyServicesSection(sc: SettingsCtx) {
                 value = sc.apiModel, label = "模型名称",
                 onCommit = { sc.saveRun { AppPreferences.setApiModel(sc.ctx, it) } },
                 onChange = sc.onApiModelChange
+            )
+            SettingsSwitch(
+                "AI 读取图片",
+                sub = if (sc.s.enableAiImage) "已开启：整张截图压缩后发给 AI（直接读图，能读出地址）"
+                else "已关闭：只把本地 OCR 文本发给 AI",
+                checked = sc.s.enableAiImage,
+                onChange = sc.save { AppPreferences.setEnableAiImage(sc.ctx, it) }
+            )
+            if (sc.s.enableAiImage) {
+                Text(
+                    "注意：开启后整张截图会上传到 AI 服务（屏幕上出现的手机号/姓名也会一并上传）。" +
+                        "模型需支持视觉（如 deepseek-flash）；deepseek-v4-pro 不支持图片，会自动回退为文本识别。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        } else {
+            // 2026-09-17 真机排障：用户把 Key/地址/模型都填好了，却忘了打开上面的开关，
+            // 而字段又只在开关打开时才显示 → 看起来"配置好了却没作用"。这里给出明确提示。
+            Text(
+                if (sc.s.apiKey.isNotBlank())
+                    "已保存 API Key，但上面的开关是关的 —— 识别流程不会调用 AI。要生效请先打开它。"
+                else "AI 识别处于关闭状态。填好 API 地址/Key/模型后，记得打开上面的开关。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        // —— 诊断：AI 连接自检（**无论开关是否打开都显示**，避免"配了却没开开关"无从判断）——
+        // 设计目的：AI 只做"补漏"（正则识别到的码会被去重丢弃），失败也只写日志，
+        // 于是"配好了却没作用"很难判断。这里直接用当前 URL/Key/模型发一次最小请求，
+        // 把 HTTP 状态码、错误正文、耗时、**实际请求地址**都显示出来。
+        Text(
+            "AI 只做补充：正则已识别到的码不会重复入库，所以界面可能看不出变化。" +
+                "想确认配置是否生效，用下面这个按钮；也可拿一张「正则识别不出码」的截图去分享验证。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "DeepSeek 示例：地址 https://api.deepseek.com（或 /v1），模型 deepseek-flash；" +
+                "注意旧文档里的 deepseek-chat / deepseek-reasoner 已停用，填了会返回 400（模型不存在）。" +
+                "本应用对 DeepSeek 会自动关闭思考模式以降低延迟。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedButton(
+            enabled = !probing,
+            onClick = {
+                probing = true
+                probeText = null
+                uiScope.launch {
+                    val t = com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel)
+                    val sb = StringBuilder()
+                    sb.append(
+                        if (t.ok) "文本通道：成功 · ${t.latencyMs}ms · 回复「${t.reply.ifBlank { "(空)" }}」"
+                        else "文本通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(t.error)}）"
+                    )
+                    var imgOk = true
+                    if (sc.s.enableAiImage) {
+                        val probeImg = com.pickupcode.app.util.ImageUtils.makeProbeImageBase64()
+                        val img = probeImg?.let {
+                            com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel, imageBase64 = it)
+                        }
+                        imgOk = img?.ok == true
+                        sb.append("\n").append(
+                            when {
+                                img == null -> "图片通道：自检图生成失败"
+                                img.ok -> "图片通道：成功 · ${img.latencyMs}ms · 识别到「${img.reply.ifBlank { "(空)" }}」（应含 CP-1234）"
+                                else -> "图片通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(img.error)}）"
+                            }
+                        )
+                    }
+                    sb.append("\n请求地址：${t.endpoint}")
+                    probing = false
+                    probeOk = t.ok && imgOk
+                    probeText = sb.toString()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, ValBlue),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = ValBlue)
+        ) { Text(if (probing) "测试中…（最多 40 秒）" else "测试 AI 连接") }
+        probeText?.let { msg ->
+            Text(
+                msg,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (probeOk) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
             )
         }
     }

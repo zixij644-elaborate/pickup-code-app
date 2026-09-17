@@ -150,4 +150,7 @@ dependencies {
     // Tests (JUnit 5 — 纯 Kotlin 单元测试，无 Android 依赖)
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
+    // 真 JSON 实现：android.jar 里的 org.json 在 JVM 单测中是桩（方法返回 null），
+    // 无法断言请求体结构/返回解析 —— 补一个纯 JVM 实现供 AIExtractorTest 使用（不进 APK）。
+    testImplementation("org.json:json:20240303")
 }
