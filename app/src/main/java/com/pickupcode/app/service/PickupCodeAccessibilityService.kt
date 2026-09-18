@@ -117,7 +117,7 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         }
 
         private val AUTO_SCAN_PACKAGES = setOf(
-            "com.meituan", "com.sankuai.meituan", "me.ele", "com.eg.android.AlipayGphone",
+            "com.meituan", "com.sankuai.meituan", "me.ele",
             "com.kfc", "com.mcdonalds", "com.cainiao.wireless",
             "com.taobao.taobao", "com.jingdong.app.mall", "com.xunmeng.pinduoduo",
         )
@@ -147,7 +147,8 @@ class PickupCodeAccessibilityService : AccessibilityService() {
             "com.icbc", "com.bankcomm", "com.spdbccc", "com.ccb", "com.abchina",
             "com.cebbank", "com.cib", "com.citic", "com.hxb", "com.pingan.paces", "com.pingan.pabank",
             // 支付 / 银联 / 钱包
-            "com.unionpay", "com.unionpay.tsmservice", "com.eg.android.AlipayGphoneRC",
+            "com.unionpay", "com.unionpay.tsmservice", "com.eg.android.AlipayGphone",
+            "com.eg.android.AlipayGphoneRC",
             "com.tenpay.android", "com.pboc", "cn.gov.pbc.dcep",
             // 身份 / 证书
             "cn.cyberIdentity.certification", "com.android.identity",
@@ -830,4 +831,3 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         }
     }
 }
-

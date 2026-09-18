@@ -22,7 +22,6 @@ class AccessibilityPackageGuardTest {
         assertTrue(PickupCodeAccessibilityService.isAutoScanPackage("com.cainiao.wireless"), "菜鸟")
         assertTrue(PickupCodeAccessibilityService.isAutoScanPackage("com.sankuai.meituan"), "美团")
         assertTrue(PickupCodeAccessibilityService.isAutoScanPackage("me.ele"), "饿了么")
-        assertTrue(PickupCodeAccessibilityService.isAutoScanPackage("com.eg.android.AlipayGphone"), "支付宝")
         // 白名单应用的真实子包也应覆盖（语义验证；注意 AccessibilityEvent.packageName 不带 ":进程名" 后缀）
         assertTrue(PickupCodeAccessibilityService.isAutoScanPackage("com.taobao.taobao.submodule"))
     }
@@ -33,6 +32,7 @@ class AccessibilityPackageGuardTest {
         assertFalse(PickupCodeAccessibilityService.isAutoScanPackage("com.eg.android.EvilApp"))
         assertFalse(PickupCodeAccessibilityService.isAutoScanPackage("com.taobao.taobao2"))
         assertFalse(PickupCodeAccessibilityService.isAutoScanPackage("com.cainiao.wirelessevil"))
+        assertFalse(PickupCodeAccessibilityService.isAutoScanPackage("com.eg.android.AlipayGphone"), "支付宝不得自动截图")
         assertFalse(PickupCodeAccessibilityService.isAutoScanPackage("com.example.app"))
     }
 
@@ -42,6 +42,8 @@ class AccessibilityPackageGuardTest {
         assertTrue(PickupCodeAccessibilityService.isSensitivePackage("cmb.pb"), "招商银行")
         assertTrue(PickupCodeAccessibilityService.isSensitivePackage("com.android.bankabc"), "农业银行")
         assertTrue(PickupCodeAccessibilityService.isSensitivePackage("com.unionpay"), "银联")
+        assertTrue(PickupCodeAccessibilityService.isSensitivePackage("com.eg.android.AlipayGphone"), "支付宝")
+        assertTrue(PickupCodeAccessibilityService.isSensitivePackage("com.eg.android.AlipayGphone.wallet"), "支付宝子包")
         assertTrue(
             PickupCodeAccessibilityService.isSensitivePackage("com.google.android.apps.authenticator2"),
             "身份验证器"
@@ -58,6 +60,5 @@ class AccessibilityPackageGuardTest {
         assertFalse(PickupCodeAccessibilityService.isSensitivePackage("com.taobao.taobao"))
         assertFalse(PickupCodeAccessibilityService.isSensitivePackage("com.xunmeng.pinduoduo"))
         assertFalse(PickupCodeAccessibilityService.isSensitivePackage("com.cainiao.wireless"))
-        assertFalse(PickupCodeAccessibilityService.isSensitivePackage("com.eg.android.AlipayGphone"), "支付宝含菜鸟小程序，不能拦")
     }
 }
