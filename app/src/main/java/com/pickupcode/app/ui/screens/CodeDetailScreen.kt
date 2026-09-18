@@ -30,6 +30,7 @@ import com.pickupcode.app.extractor.CodeExtractor
 import com.pickupcode.app.extractor.CodeValidator
 import com.pickupcode.app.learner.CommonStationStore
 import com.pickupcode.app.learner.PatternLearner
+import com.pickupcode.app.ui.components.BrandBadge
 import com.pickupcode.app.ui.components.BrandLogo
 import com.pickupcode.app.ui.components.IdentityCodeTopBarActions
 import kotlinx.coroutines.Dispatchers
@@ -135,18 +136,14 @@ fun CodeDetailScreen(
             EditableField(label = "来源", value = item.source, displayFontSize = 18.sp,
                 onSave = { onUpdateField(EditField.SOURCE, it) },
                 leadingIcon = {
-                    // 品牌 logo（未收录的品牌不显示，仅文字）
+                    // 品牌 logo（未收录的品牌不显示，仅文字）；容器风格与主页卡统一（BrandBadge）
                     val lr = BrandLogo.logoRes(item.source, item.shareSourceName, item.shareSourcePkg)
                     if (lr != null) {
-                        Box(
-                            modifier = Modifier.size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Image(painterResource(lr), contentDescription = item.source,
-                                contentScale = ContentScale.Fit, modifier = Modifier.size(28.dp))
-                        }
+                        BrandBadge(
+                            res = lr,
+                            contentDescription = item.source,
+                            boxSize = 32.dp
+                        )
                     }
                 },
                 trailingAction = {

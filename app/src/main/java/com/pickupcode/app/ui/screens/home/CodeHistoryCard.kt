@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pickupcode.app.data.CodeHistory
+import com.pickupcode.app.ui.components.BrandBadge
 import com.pickupcode.app.ui.components.BrandLogo
 import com.pickupcode.app.ui.theme.TypeCoupon
 import com.pickupcode.app.ui.theme.TypeFood
@@ -118,24 +119,15 @@ fun CodeHistoryCard(
                 }
             }
 
-            // 品牌 logo（未收录的品牌回退为类型徽标）
+            // 品牌 logo（未收录的品牌回退为类型徽标）—— 容器风格统一走 BrandBadge
             val logoRes = BrandLogo.logoRes(item.source, item.shareSourceName, item.shareSourcePkg)
             if (logoRes != null) {
-                Box(
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(logoRes),
-                        contentDescription = item.source.ifBlank { item.shareSourceName },
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                BrandBadge(
+                    res = logoRes,
+                    contentDescription = item.source.ifBlank { item.shareSourceName },
+                    modifier = Modifier.padding(end = 8.dp),
+                    boxSize = 28.dp
+                )
             } else {
                 // 类型 badge
                 Text(
