@@ -262,9 +262,9 @@ object CodeNotificationManager {
             val style = typeStyle(type)
             val pendingIntent = launchPendingIntent(context)
             val (title, text) = if (kind == KIND_EXPIRY) {
-                "⏳ 取件码可能快到期：$code" to "存放已久，记得及时去取：$code（$source）"
+                "取件码可能快到期：$code" to "存放已久，记得及时去取：$code（$source）"
             } else {
-                "⏰ 稍后提醒：${style.title} $code" to "记得去取：$code（$source）"
+                "稍后提醒：${style.title} $code" to "记得去取：$code（$source）"
             }
             val notification = NotificationCompat.Builder(context, style.channelId)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)

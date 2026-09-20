@@ -19,12 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -53,14 +49,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Image
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import android.util.Log
 import androidx.compose.ui.unit.sp
+import com.pickupcode.app.R
+import com.pickupcode.app.ui.components.IconText
 import com.pickupcode.app.data.AppDatabase
 import com.pickupcode.app.data.CodeHistory
 import com.pickupcode.app.ui.theme.TypeCoupon
@@ -172,18 +173,43 @@ fun HomeScreen(
                     Text("码上闪记", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 },
                 actions = {
+                    // 右上角四个动作图标：2026-09-18 用户指定换成附件里的线性图标（Lucide 风格），
+                    // 统一用 onSurface 上色（比默认的 onSurfaceVariant 更深）+ 20dp（用户反馈 24dp 偏大）
+                    // + 同一个 IconButton 热区。
+                    val actionTint = MaterialTheme.colorScheme.onSurface
+                    val iconModifier = Modifier.size(20.dp)
                     // 取件时最常用的动作放在最前面：一键打开身份码
                     IconButton(onClick = onIdentityCodeClick) {
-                        Icon(Icons.Default.QrCode, "身份码")
+                        Image(
+                            painter = painterResource(R.drawable.ic_action_qr_code),
+                            contentDescription = "身份码",
+                            colorFilter = ColorFilter.tint(actionTint),
+                            modifier = iconModifier
+                        )
                     }
                     IconButton(onClick = onStatsClick) {
-                        Icon(Icons.Default.Info, "统计")
+                        Image(
+                            painter = painterResource(R.drawable.ic_action_info),
+                            contentDescription = "统计",
+                            colorFilter = ColorFilter.tint(actionTint),
+                            modifier = iconModifier
+                        )
                     }
                     IconButton(onClick = onTrashClick) {
-                        Icon(Icons.Default.RestoreFromTrash, "回收站")
+                        Image(
+                            painter = painterResource(R.drawable.ic_action_trash),
+                            contentDescription = "回收站",
+                            colorFilter = ColorFilter.tint(actionTint),
+                            modifier = iconModifier
+                        )
                     }
                     IconButton(onClick = onSettingsClick) {
-                        Icon(Icons.AutoMirrored.Filled.List, "设置")
+                        Image(
+                            painter = painterResource(R.drawable.ic_action_list),
+                            contentDescription = "设置",
+                            colorFilter = ColorFilter.tint(actionTint),
+                            modifier = iconModifier
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -238,7 +264,8 @@ fun HomeScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("🔔 需要通知权限", style = MaterialTheme.typography.titleSmall)
+                            IconText(R.drawable.ic_bell, "需要通知权限",
+                                style = MaterialTheme.typography.titleSmall)
                             Spacer(Modifier.height(4.dp))
                             Text("开启后才能在锁屏/通知栏显示取餐取件码",
                                 style = MaterialTheme.typography.bodySmall,
@@ -259,10 +286,15 @@ fun HomeScreen(
                         accessibilityEnabledInSettings -> MaterialTheme.colorScheme.errorContainer
                         else -> MaterialTheme.colorScheme.tertiaryContainer
                     }
+                    val titleIcon = when {
+                        isAccessibilityEnabled -> R.drawable.ic_circle_check
+                        accessibilityEnabledInSettings -> R.drawable.ic_triangle_alert
+                        else -> R.drawable.ic_wrench
+                    }
                     val title = when {
-                        isAccessibilityEnabled -> "✅ 无障碍服务已开启"
-                        accessibilityEnabledInSettings -> "⚠️ 无障碍服务未在运行"
-                        else -> "🔧 需要开启无障碍服务"
+                        isAccessibilityEnabled -> "无障碍服务已开启"
+                        accessibilityEnabledInSettings -> "无障碍服务未在运行"
+                        else -> "需要开启无障碍服务"
                     }
 
                     Card(
@@ -272,7 +304,8 @@ fun HomeScreen(
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(title, style = MaterialTheme.typography.titleSmall,
+                                IconText(titleIcon, title,
+                                    style = MaterialTheme.typography.titleSmall,
                                     modifier = Modifier.weight(1f))
                                 IconButton(onClick = onHideAccessibilityCard, modifier = Modifier.size(28.dp)) {
                                     Icon(Icons.Default.Close, contentDescription = "隐藏",
@@ -280,7 +313,7 @@ fun HomeScreen(
                                 }
                             }
                             if (isAccessibilityEnabled) {
-                                Text("打开控制面板 → 点✏️编辑 → 找到「码上闪记」→ 拖到面板",
+                                Text("打开控制面板 → 点右上角编辑 → 找到「码上闪记」→ 拖到面板",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(4.dp))
@@ -319,7 +352,7 @@ fun HomeScreen(
                             .padding(12.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📥 怎么添加取餐码/取件码/券码?",
+                            IconText(R.drawable.ic_download, "怎么添加取餐码/取件码/券码?",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f))
                             Text(if (guideExpanded) "▴" else "▾",
@@ -333,7 +366,7 @@ fun HomeScreen(
                                 Text("（在短信/聊天里长按选中文字或点分享 → 选「码上闪记」）",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("·点右下角 ➕ 手动粘贴", style = MaterialTheme.typography.bodySmall,
+                                Text("·点右下角「+」手动粘贴", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("·通过无障碍服务调用OCR识别", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -361,7 +394,7 @@ fun HomeScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🗑️ 回收站有 ${trashHistory.size} 条记录，24小时后自动删除",
+                            IconText(R.drawable.ic_trash_2, "回收站有 ${trashHistory.size} 条记录，24小时后自动删除",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -381,7 +414,7 @@ fun HomeScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔄 发现 ${dedupCount} 组重复记录，点击查看 →",
+                            IconText(R.drawable.ic_refresh_cw, "发现 ${dedupCount} 组重复记录，点击查看 →",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer)
                         }

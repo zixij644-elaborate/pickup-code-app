@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.pickupcode.app.R
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -265,7 +267,8 @@ private fun SettingsSwitch(
     title: String,
     sub: String? = null,
     checked: Boolean,
-    onChange: (Boolean) -> Unit
+    onChange: (Boolean) -> Unit,
+    @DrawableRes icon: Int? = null
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -273,7 +276,17 @@ private fun SettingsSwitch(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            // 图标（Lucide 线性）替代原先写在标题里的 Emoji（用户 2026-09-18 要求）
+            if (icon != null) {
+                com.pickupcode.app.ui.components.IconText(
+                    icon = icon,
+                    text = title,
+                    iconSize = 17.dp,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            } else {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+            }
             sub?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -295,14 +308,26 @@ private fun SettingsSwitch(
 /* ═══════════════════ 各分组 Section ═══════════════════ */
 
 @Composable
-private fun SettingsSubHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp)
-    )
+private fun SettingsSubHeader(text: String, @DrawableRes icon: Int? = null) {
+    if (icon != null) {
+        com.pickupcode.app.ui.components.IconText(
+            icon = icon,
+            text = text,
+            iconSize = 16.dp,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    } else {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
 }
 
 /** ① 识别设置：灵敏度 + 识别类型 */
@@ -327,10 +352,10 @@ private fun RecognitionSettingsSection(sc: SettingsCtx) {
             Text("${(confDraft * 100).roundToInt()}%", modifier = Modifier.padding(start = 8.dp))
         }
         SettingsSubHeader("识别类型")
-        SettingsSwitch("🥤 取餐码", checked = sc.s.enableFoodCodes, onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) })
-        SettingsSwitch("📦 取件码", checked = sc.s.enableParcelCodes, onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) })
+        SettingsSwitch("取餐码", icon = R.drawable.ic_cup_soda, checked = sc.s.enableFoodCodes, onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) })
+        SettingsSwitch("取件码", icon = R.drawable.ic_package, checked = sc.s.enableParcelCodes, onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) })
         SettingsSwitch(
-            "🎫 券码",
+            "券码", icon = R.drawable.ic_ticket,
             sub = "识别屏幕/图片中的二维码（解码内容为码值；识别到则只标券码，不叠加取餐/取件码）",
             checked = sc.s.enableCouponCodes,
             onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
@@ -351,16 +376,16 @@ private fun InputMethodsSection(sc: SettingsCtx) {
             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
         ) { Text("在主页重新显示无障碍提示") }
         SettingsSubHeader("外部接收")
-        SettingsSwitch("🔗 Intent 接收", sub = "接收来自其他App的分享（文本/图片）", checked = sc.s.enableIntentReceive, onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) })
-        SettingsSwitch("📤 分享识别", sub = "文本选择菜单/拖放直达时自动识别取餐取件码", checked = sc.s.enableShareDetection, onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) })
+        SettingsSwitch("Intent 接收", icon = R.drawable.ic_link, sub = "接收来自其他App的分享（文本/图片）", checked = sc.s.enableIntentReceive, onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) })
+        SettingsSwitch("分享识别", icon = R.drawable.ic_upload, sub = "文本选择菜单/拖放直达时自动识别取餐取件码", checked = sc.s.enableShareDetection, onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) })
         SettingsSubHeader("短信识别")
         SettingsSwitch(
-            "📨 短信取件码自动识别",
+            "短信取件码自动识别", icon = R.drawable.ic_send,
             sub = if (sc.s.enableSmsReceive) "已开启" else "已关闭",
             checked = sc.s.enableSmsReceive,
             onChange = sc.onSmsEnable
         )
-        SettingsSubHeader("⏳ 到期提醒")
+        SettingsSubHeader("到期提醒", icon = R.drawable.ic_hourglass)
         SettingsSwitch(
             "快递取件码到期提醒",
             sub = if (sc.s.enableExpiryRemind) "存放 3 天或文本时限到达时自动提醒" else "已关闭",
@@ -442,9 +467,9 @@ private fun NotificationStatusCard(sc: SettingsCtx) {
     val onContainer = if (isError) MaterialTheme.colorScheme.onErrorContainer
     else MaterialTheme.colorScheme.onTertiaryContainer
     val title = when (status) {
-        NotifStatus.NEED_PERMISSION -> "🔧 需要通知权限"
-        NotifStatus.DISABLED -> "⚠️ 系统通知被关闭"
-        else -> "⚠️ 部分通知渠道被静默"
+        NotifStatus.NEED_PERMISSION -> "需要通知权限"
+        NotifStatus.DISABLED -> "系统通知被关闭"
+        else -> "部分通知渠道被静默"
     }
 
     Card(
@@ -484,7 +509,7 @@ private fun VerifyServicesSection(sc: SettingsCtx) {
     val uiScope = rememberCoroutineScope()
 
     SettingsSectionCard(title = "辅助验证", subtitle = "第三方服务验证 OCR 结果（需联网，可选）") {
-        SettingsSubHeader("🗺️ 地图验证")
+        SettingsSubHeader("地图验证", icon = R.drawable.ic_map)
         SettingsSwitch(
             "启用地图验证",
             sub = if (sc.s.enableMapVerify) "已启用" else "已关闭（隐私优先）",
@@ -502,7 +527,7 @@ private fun VerifyServicesSection(sc: SettingsCtx) {
             )
             AmapHelpSection()
         }
-        SettingsSubHeader("📮 快递100验证")
+        SettingsSubHeader("快递100验证", icon = R.drawable.ic_mailbox)
         SettingsSwitch(
             "启用快递100验证",
             sub = if (sc.s.enableKuaidi100) "已启用" else "已关闭",
@@ -517,7 +542,7 @@ private fun VerifyServicesSection(sc: SettingsCtx) {
             )
             Kuaidi100HelpSection()
         }
-        SettingsSubHeader("🤖 AI 识别")
+        SettingsSubHeader("AI 识别", icon = R.drawable.ic_bot)
         SettingsSwitch(
             "启用 AI 识别",
             sub = if (sc.s.enableAI) {
@@ -701,7 +726,7 @@ private fun AboutSection(sc: SettingsCtx) {    SettingsSectionCard(title = "关�
             if (BuildConfig.DEBUG) {
                 var showDebug by remember { mutableStateOf(false) }
                 Text(
-                    "🔍 识别调试",
+                    "识别调试",
                     style = MaterialTheme.typography.bodySmall,
                     color = ValBlue,
                     modifier = Modifier

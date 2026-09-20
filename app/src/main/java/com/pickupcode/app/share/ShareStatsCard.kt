@@ -54,7 +54,7 @@ object ShareStatsCard {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)   // 允许从非 Activity context / 后台线程安全启动
-                putExtra(Intent.EXTRA_TEXT, "我的取件/取餐码识别成绩单 📊")
+                putExtra(Intent.EXTRA_TEXT, "我的取件/取餐码识别成绩单")
             }
             val chooser = Intent.createChooser(send, "分享成绩卡").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)

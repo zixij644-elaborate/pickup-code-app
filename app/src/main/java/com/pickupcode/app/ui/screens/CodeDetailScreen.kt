@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -32,7 +33,9 @@ import com.pickupcode.app.learner.CommonStationStore
 import com.pickupcode.app.learner.PatternLearner
 import com.pickupcode.app.ui.components.BrandBadge
 import com.pickupcode.app.ui.components.BrandLogo
+import com.pickupcode.app.ui.components.IconText
 import com.pickupcode.app.ui.components.IdentityCodeTopBarActions
+import com.pickupcode.app.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -147,10 +150,15 @@ fun CodeDetailScreen(
                     }
                 },
                 trailingAction = {
-                    // 🚪 跳转来源 App（与取件地址卡的 📍 同布局：右端图标）。仅当有关分享来源显示。
+                    // 跳转来源 App（与取件地址卡的导航图标同布局：右端图标）
                     if (item.shareSourcePkg.isNotBlank()) {
                         IconButton(onClick = { com.pickupcode.app.share.ShareReceiver.openApp(ctx, item.shareSourcePkg) }) {
-                            Text("🚪", fontSize = 20.sp)
+                            Image(
+                                painter = painterResource(R.drawable.ic_door_open),
+                                contentDescription = "打开来源应用",
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 })
@@ -182,9 +190,14 @@ fun CodeDetailScreen(
                 EditableField(label = "取件地址", value = item.pickupAddress, displayFontSize = 16.sp,
                     onSave = { onUpdateField(EditField.ADDRESS, it) },
                     trailingAction = {
-                        // 📍 唤起导航：用 geo: URI 让系统地图应用弹出选择（与分享来源卡片的 🚪 同布局：右端图标）
+                        // 唤起导航：用 geo: URI 让系统地图应用弹出选择（与分享来源卡片的「打开来源」同布局）
                         IconButton(onClick = { launchNavigation(ctx, item.pickupAddress) }) {
-                            Text("📍", fontSize = 20.sp)
+                            Image(
+                                painter = painterResource(R.drawable.ic_map_pin),
+                                contentDescription = "导航到取件地址",
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     })
 
@@ -198,7 +211,11 @@ fun CodeDetailScreen(
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AssistChip(
                             onClick = {},
-                            label = { Text("🏠 常用取件点 · 已取 ${freq.count} 次", style = MaterialTheme.typography.labelSmall) },
+                            label = {
+                                IconText(R.drawable.ic_house, "常用取件点 · 已取 ${freq.count} 次",
+                                    iconSize = 13.dp,
+                                    style = MaterialTheme.typography.labelSmall)
+                            },
                             colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
                         )
                     }
@@ -210,7 +227,9 @@ fun CodeDetailScreen(
                         AssistChip(
                             onClick = {},
                             label = {
-                                Text("📍 地图已验证", style = MaterialTheme.typography.labelSmall)
+                                IconText(R.drawable.ic_map_pin, "地图已验证",
+                                    iconSize = 13.dp,
+                                    style = MaterialTheme.typography.labelSmall)
                             },
                             colors = AssistChipDefaults.assistChipColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -256,11 +275,18 @@ fun CodeDetailScreen(
                 Card(Modifier.fillMaxWidth().clickable { showFullscreen = true },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("📷 截屏（点击放大）", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconText(R.drawable.ic_camera, "截屏（点击放大）",
+                            iconSize = 15.dp,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
                         bitmap?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "截屏",
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.FillWidth) }
-                        Text("👆 点击放大查看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                        IconText(R.drawable.ic_pointer, "点击放大查看",
+                            iconSize = 13.dp,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp))
                     }
                 }
                 if (showFullscreen) {
@@ -332,7 +358,8 @@ fun CodeDetailScreen(
                         onMarkDone(item.id)
                     }, modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8DC0E0), contentColor = Color.White)) {
-                        Text("📦 标记已取")
+                        IconText(R.drawable.ic_package, "标记已取", iconSize = 16.dp,
+                            color = Color.White, iconTint = Color.White)
                     }
                 }
                 // C3: 稍后提醒（1 小时后推通知）
@@ -349,7 +376,7 @@ fun CodeDetailScreen(
                         modifier = Modifier.fillMaxWidth(),
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Text("⏰ 稍后提醒")
+                        IconText(R.drawable.ic_alarm_clock, "稍后提醒", iconSize = 16.dp)
                     }
                 }
             }
@@ -360,11 +387,21 @@ fun CodeDetailScreen(
 @Composable
 private fun InlineConfirm(label: String, confirmed: Boolean, incorrect: Boolean, onCorrect: () -> Unit, onIncorrect: () -> Unit) {
     if (confirmed || incorrect) {
-        Text(
-            if (confirmed) "$label ✓" else "已标记错误",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (confirmed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-        )
+        if (confirmed) {
+            IconText(
+                R.drawable.ic_check,
+                label,
+                iconSize = 13.dp,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        } else {
+            Text(
+                "已标记错误",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         return
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  淘宝（单色线性图标）：来源 arcticons 图标集（48×48 线性风），用户 2026-09-18 指定这个风格。
+  单色 + 描边：靠 tint 上色，与主界面右上角那排 Material 动作图标同一视觉重量。
+  描边宽度 3.6（viewBox 48 → 24dp 时约 2.2dp，与 Material 动作图标同重量）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.5 10.403a15.8 15.8 0 0 1 4.827 4.291m-4.559 4.881c10.529 7.165 6.8 13.964.805 20.704M19.412 7.721c-.267 8.067-3.715 10.308-6.544 13.034" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M18.644 12.882a49 49 0 0 1 13.265-2.64c8.201-.296 10.77 4.217 11.317 9.601c.834 8.192-.151 13.39-4.13 17.326c-2.316 2.29-6.314 4.882-14.053.482M20.88 20.12h12.658m-6.978.212v13.416m-10.206-7.253h19.47m-4.076 2.038l1.716 6.007" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M32.711 31.905c-2.233.704-13.314 5.632-15.767-2.353m6.597-12.98l-5.149 6.865" />
+</vector>

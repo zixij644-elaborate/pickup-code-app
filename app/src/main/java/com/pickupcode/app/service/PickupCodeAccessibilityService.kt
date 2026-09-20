@@ -767,7 +767,7 @@ class PickupCodeAccessibilityService : AccessibilityService() {
     /** ⑥ 有冲突时通知用户自行判断（自动扫描静默）。 */
     private fun notifyConflicts(conflicts: List<String>, silent: Boolean) {
         if (conflicts.isNotEmpty() && !silent) {
-            showResult("⚠️ 「${conflicts.joinToString("、")}」同时匹配取餐/取件类型，请进入App确认")
+            showResult("「${conflicts.joinToString("、")}」同时匹配取餐/取件类型，请进入App确认")
         }
     }
 

@@ -1,5 +1,7 @@
 package com.pickupcode.app.ui.screens
 
+import com.pickupcode.app.ui.components.IconText
+import com.pickupcode.app.R
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
@@ -44,9 +46,9 @@ fun RecognitionDebugDialog(onDismiss: () -> Unit) {
                 .padding(16.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("🔍 识别调试", style = MaterialTheme.typography.titleLarge)
+                IconText(R.drawable.ic_search, "识别调试", iconSize = 20.dp, style = MaterialTheme.typography.titleLarge)
                 Row {
-                    Text("📤 导出语料", style = MaterialTheme.typography.titleMedium,
+                    IconText(R.drawable.ic_upload, "导出语料", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
                             .clickable { exportCorpus(ctx) }

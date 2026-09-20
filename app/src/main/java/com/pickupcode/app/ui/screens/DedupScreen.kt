@@ -1,5 +1,7 @@
 package com.pickupcode.app.ui.screens
 
+import com.pickupcode.app.ui.components.IconText
+import com.pickupcode.app.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -93,11 +95,14 @@ private fun DuplicateGroupCard(entries: List<CodeHistory>, onChanged: () -> Unit
     ) {
         Column(Modifier.padding(16.dp)) {
             val icon = when (type) {
-                "pickup_food" -> "🥤"
-                "coupon" -> "🎟️"
-                else -> "📦"
+                "pickup_food" -> R.drawable.ic_cup_soda
+                "coupon" -> R.drawable.ic_ticket
+                else -> R.drawable.ic_package
             }
-            Text("$icon $code  (${entries.size} 条重复)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconText(icon, "$code  (${entries.size} 条重复)",
+                iconSize = 18.dp,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
 
             entries.forEachIndexed { idx, e ->

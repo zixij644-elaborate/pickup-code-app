@@ -15,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
@@ -31,9 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pickupcode.app.R
 import com.pickupcode.app.data.CodeHistory
 import com.pickupcode.app.ui.components.BrandBadge
 import com.pickupcode.app.ui.components.BrandLogo
+import com.pickupcode.app.ui.components.IconText
 import com.pickupcode.app.ui.theme.TypeCoupon
 import com.pickupcode.app.ui.theme.TypeFood
 import com.pickupcode.app.ui.theme.TypeParcel
@@ -109,12 +112,13 @@ fun CodeHistoryCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (item.pickupAddress.isNotBlank()) {
-                    Text(
-                        text = "📍 ${item.pickupAddress}",
-                        fontSize = 12.sp,
+                    IconText(
+                        icon = R.drawable.ic_map_pin,
+                        text = item.pickupAddress,
+                        iconSize = 13.dp,
+                        style = LocalTextStyle.current.copy(fontSize = 12.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 1
                     )
                 }
             }

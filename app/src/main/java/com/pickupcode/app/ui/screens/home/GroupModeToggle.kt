@@ -1,5 +1,6 @@
 package com.pickupcode.app.ui.screens.home
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +15,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pickupcode.app.R
 
 /**
  * 分组方式切换：按时间（今天/昨天/更早） / 按地址聚合。
@@ -33,7 +37,11 @@ fun GroupModeToggle(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        listOf("time" to "⏱ 按时间", "address" to "📍 按地址").forEach { (key, label) ->
+        // 2026-09-18：标签里的 Emoji 换成 Lucide 线性图标（未选中显示类型图标，选中显示对勾）
+        listOf(
+            Triple("time", "按时间", R.drawable.ic_timer),
+            Triple("address", "按地址", R.drawable.ic_map_pin)
+        ).forEach { (key, label, iconRes) ->
             val selected = mode == key
             FilterChip(
                 selected = selected,
@@ -42,6 +50,13 @@ fun GroupModeToggle(
                 leadingIcon = {
                     if (selected) {
                         Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    } else {
+                        Image(
+                            painter = painterResource(iconRes),
+                            contentDescription = null,
+                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                            modifier = Modifier.size(15.dp)
+                        )
                     }
                 },
                 colors = FilterChipDefaults.filterChipColors(

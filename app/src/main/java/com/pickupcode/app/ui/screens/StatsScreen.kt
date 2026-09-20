@@ -1,5 +1,11 @@
 package com.pickupcode.app.ui.screens
 
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.ColorFilter
+import com.pickupcode.app.ui.components.IconText
+import com.pickupcode.app.R
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -67,7 +73,7 @@ fun StatsScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("📊 识别统计") },
+                title = { IconText(R.drawable.ic_bar_chart_3, "识别统计", iconSize = 20.dp) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
@@ -219,7 +225,7 @@ private fun SuggestionsCard(suggestions: List<PatternSuggestion>, onCleared: (Bo
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("💡 模式建议", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                IconText(R.drawable.ic_lightbulb, "模式建议", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 if (suggestions.isNotEmpty()) {
                     TextButton(onClick = { showClearDialog = true }) {
                         Text("清除", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
@@ -315,7 +321,7 @@ private fun HitRateCard(stats: List<DailyStats.DayStat>) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("📈 命中率趋势", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconText(R.drawable.ic_trending_up, "命中率趋势", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text("近 ${stats.size} 天识别命中率变化", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
             if (stats.size < 2) {
@@ -391,7 +397,7 @@ private fun LearnedRulesCard(rules: List<PatternLearner.LearnedRule>, onChanged:
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("🧠 已学习规则", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            IconText(R.drawable.ic_brain, "已学习规则", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text("系统自动从未识别样本中学习并应用的新正则。可停用/删除误学报废的规则。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
             if (rules.isEmpty()) {
@@ -437,14 +443,18 @@ private fun LearnedRulesCard(rules: List<PatternLearner.LearnedRule>, onChanged:
                             Text("已停用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
-                    // A1: 停用/启用 + 删除 按钮 + 类型图标
-                    Text(
-                        when (rule.type) {
-                            "pickup_food" -> "🥤"
-                            "coupon" -> "🎫"
-                            else -> "📦"
-                        },
-                        style = MaterialTheme.typography.titleMedium
+                    // A1: 停用/启用 + 删除 按钮 + 类型图标（Emoji 换成 Lucide 线性图标）
+                    Image(
+                        painter = painterResource(
+                            when (rule.type) {
+                                "pickup_food" -> R.drawable.ic_cup_soda
+                                "coupon" -> R.drawable.ic_ticket
+                                else -> R.drawable.ic_package
+                            }
+                        ),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                        modifier = Modifier.size(18.dp)
                     )
                     TextButton(
                         onClick = {

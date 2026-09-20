@@ -14,6 +14,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pickupcode.app.R
+import com.pickupcode.app.ui.components.IconText
 import com.pickupcode.app.util.IdentityCodeLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -79,12 +81,6 @@ fun IdentityCodeScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium
             )
 
-            Text(
-                "小提示：部分手机（如 vivo/OPPO）会弹出「是否允许跳转」的系统确认框，点允许即可。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
             Spacer(Modifier.height(4.dp))
 
             IdentityEntry(
@@ -107,8 +103,10 @@ fun IdentityCodeScreen(onBack: () -> Unit) {
             )
 
             Spacer(Modifier.height(8.dp))
-            Text(
-                "🔒 身份码等于取件授权，请勿截图外传。",
+            IconText(
+                R.drawable.ic_lock,
+                "身份码等于取件授权，请勿截图外传。",
+                iconSize = 15.dp,
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFB3261E)
             )
