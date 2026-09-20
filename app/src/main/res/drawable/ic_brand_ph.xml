@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ph（单色线性图标，可 tint 上色）。
+  2026-09-20 品牌单色化：卡片徽标与顶栏统一走单色 + tint(ColorScheme.onSurfaceVariant)。
+
+  来源 Iconify arcticons:pizzahut（Arcticons，CC BY-SA 4.0，署名见仓库 ICONS/NOTICE）。线性描边；细节密，strokeWidth 由 4.4 降到 3.0。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="m43.5 29.95l-10.02-6.91l-1.77-4.99H16.29l-1.77 4.99L4.5 29.95z" />
+</vector>

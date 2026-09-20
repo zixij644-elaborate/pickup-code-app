@@ -123,7 +123,7 @@ fun CodeHistoryCard(
                 }
             }
 
-            // 品牌 logo（未收录的品牌回退为类型徽标）—— 容器风格统一走 BrandBadge
+            // 品牌单色图标（未收录的品牌回退为类型徽标）—— 容器+配色统一走 BrandBadge
             val logoRes = BrandLogo.logoRes(item.source, item.shareSourceName, item.shareSourcePkg)
             if (logoRes != null) {
                 BrandBadge(

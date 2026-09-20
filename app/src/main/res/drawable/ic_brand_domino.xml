@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  domino（单色线性图标，可 tint 上色）。
+  2026-09-20 品牌单色化：卡片徽标与顶栏统一走单色 + tint(ColorScheme.onSurfaceVariant)。
+
+  来源 Iconify arcticons:dominos（Arcticons，CC BY-SA 4.0，署名见仓库 ICONS/NOTICE）。线性描边；细节密，strokeWidth 由 4.4 降到 3.0。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <group android:rotation="45" android:pivotX="23.999" android:pivotY="24"><path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16.17 6.04L31.84 6.04A0.9 0.9 0 0 1 32.74 6.94L32.74 41.05A0.9 0.9 0 0 1 31.84 41.95L16.17 41.95A0.9 0.9 0 0 1 15.27 41.05L15.27 6.94A0.9 0.9 0 0 1 16.17 6.04Z" /></group>
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="m17.82 17.82l12.36 12.36" />
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M27.57 17.45A2.98 2.98 0 1 0 33.53 17.45A2.98 2.98 0 1 0 27.57 17.45Z" />
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M18.87 30.51A2.98 2.98 0 1 0 24.83 30.51A2.98 2.98 0 1 0 18.87 30.51Z" />
+    <path android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10.14 30.51A2.98 2.98 0 1 0 16.1 30.51A2.98 2.98 0 1 0 10.14 30.51Z" />
+</vector>

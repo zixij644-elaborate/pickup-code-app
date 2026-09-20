@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   拼多多（单色线性图标）：来源 arcticons:pinduoduo（48×48 线性风）。
-  与原 res/drawable-nodpi/logo_pinduoduo.png（不透明红色方块）并存：本图标用于"统一线性风"的展示位。
+  2026-09-20 起全 App 只有单色图标，彩色原图 logo_pinduoduo.png 已删除。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

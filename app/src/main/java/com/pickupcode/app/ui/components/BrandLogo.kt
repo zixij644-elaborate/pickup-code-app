@@ -4,43 +4,50 @@ import androidx.annotation.DrawableRes
 import com.pickupcode.app.R
 
 /**
- * 品牌 logo 映射：把识别来源（品牌名/分享来源 App）映射到内置的品牌 logo 图片。
+ * 品牌图标映射：把识别来源（品牌名/分享来源 App）映射到内置的**品牌单色图标**。
  *
  * 匹配规则（matchKey，纯函数可单测）：
  * 1. 拼接 source 与 shareSourceName 后规范化（去掉 快递/物流/速递/驿站/旗舰店/超市/门店 等后缀）；
  * 2. 按品牌关键词 contains 匹配，长关键词优先（如「美团外卖」先于「美团」）；
  * 3. 未收录的品牌返回 null，UI 层回退到「类型徽标」。
  *
- * 资源来源：各品牌官网/官方资产抓取并归一化为 128×128 透明 PNG（res/drawable-nodpi/logo_*.png）。
- * 版权说明：品牌 logo 归各品牌所有，此处仅作识别用途（nominative use）。
+ * 图标资源（2026-09-20 品牌单色化：用户要求卡片徽标也统一单色 + 跟随主题色）：
+ * - **矢量** `res/drawable/ic_brand_*.xml`（任意尺寸清晰）：淘宝/菜鸟/拼多多/必胜客/达美乐来自 **arcticons**；
+ *   肯德基/麦当劳/星巴克/美团来自 **simple-icons**。
+ * - **位图** `res/drawable-nodpi/brand_*_mono.png`（128×128 纯黑+alpha，靠 tint 上色）：
+ *   其余 15 个品牌。其中顺丰/韵达/圆通/申通/极兔/京东/德邦/瑞幸/蜜雪/海底捞/绝味/周黑鸭/饿了么
+ *   为彩色原图描摹；**中通、好利来为亮度抠图重制**（圆盘+内部白字，旧描摹只取 alpha 会退化成实心圆）。
+ *
+ * 许可证：simple-icons = CC0-1.0；arcticons = CC BY-SA 4.0（署名见仓库 ICONS.md）。
+ * 品牌商标归各品牌所有，此处仅作识别用途（nominative use）。
  */
 object BrandLogo {
 
     private val LOGO_BY_KEY: Map<String, Int> = mapOf(
-        "yunda" to R.drawable.logo_yunda,
-        "zto" to R.drawable.logo_zto,
-        "yto" to R.drawable.logo_yto,
-        "sto" to R.drawable.logo_sto,
-        "sf" to R.drawable.logo_sf,
-        "jt" to R.drawable.logo_jt,
-        "jd" to R.drawable.logo_jd,
-        "cainiao" to R.drawable.logo_cainiao,
-        "deppon" to R.drawable.logo_deppon,
-        "luckin" to R.drawable.logo_luckin,
-        "mixue" to R.drawable.logo_mixue,
-        "mcd" to R.drawable.logo_mcd,
-        "kfc" to R.drawable.logo_kfc,
-        "sbux" to R.drawable.logo_sbux,
-        "ph" to R.drawable.logo_ph,
-        "domino" to R.drawable.logo_domino,
-        "haidilao" to R.drawable.logo_haidilao,
-        "juewei" to R.drawable.logo_juewei,
-        "zhy" to R.drawable.logo_zhy,
-        "holiland" to R.drawable.logo_holiland,
-        "meituan" to R.drawable.logo_meituan,
-        "eleme" to R.drawable.logo_eleme,
-        "taobao" to R.drawable.logo_taobao,
-        "pinduoduo" to R.drawable.logo_pinduoduo
+        "yunda" to R.drawable.brand_yunda_mono,
+        "zto" to R.drawable.brand_zto_mono,
+        "yto" to R.drawable.brand_yto_mono,
+        "sto" to R.drawable.brand_sto_mono,
+        "sf" to R.drawable.brand_sf_mono,
+        "jt" to R.drawable.brand_jt_mono,
+        "jd" to R.drawable.brand_jd_mono,
+        "cainiao" to R.drawable.ic_brand_cainiao,
+        "deppon" to R.drawable.brand_deppon_mono,
+        "luckin" to R.drawable.brand_luckin_mono,
+        "mixue" to R.drawable.brand_mixue_mono,
+        "mcd" to R.drawable.ic_brand_mcd,
+        "kfc" to R.drawable.ic_brand_kfc,
+        "sbux" to R.drawable.ic_brand_sbux,
+        "ph" to R.drawable.ic_brand_ph,
+        "domino" to R.drawable.ic_brand_domino,
+        "haidilao" to R.drawable.brand_haidilao_mono,
+        "juewei" to R.drawable.brand_juewei_mono,
+        "zhy" to R.drawable.brand_zhy_mono,
+        "holiland" to R.drawable.brand_holiland_mono,
+        "meituan" to R.drawable.ic_brand_meituan,
+        "eleme" to R.drawable.brand_eleme_mono,
+        "taobao" to R.drawable.ic_brand_taobao,
+        "pinduoduo" to R.drawable.ic_brand_pinduoduo
     )
 
     /** 品牌关键词 → key。顺序无关（匹配时按长度降序）。 */

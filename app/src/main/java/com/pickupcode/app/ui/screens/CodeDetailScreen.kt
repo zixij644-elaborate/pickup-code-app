@@ -139,7 +139,7 @@ fun CodeDetailScreen(
             EditableField(label = "来源", value = item.source, displayFontSize = 18.sp,
                 onSave = { onUpdateField(EditField.SOURCE, it) },
                 leadingIcon = {
-                    // 品牌 logo（未收录的品牌不显示，仅文字）；容器风格与主页卡统一（BrandBadge）
+                    // 品牌单色图标（未收录的品牌不显示，仅文字）；容器+配色与主页卡统一（BrandBadge）
                     val lr = BrandLogo.logoRes(item.source, item.shareSourceName, item.shareSourcePkg)
                     if (lr != null) {
                         BrandBadge(
