@@ -186,10 +186,13 @@ private fun TrashCard(
     }
 }
 
+// 同 CodeHistoryCard：格式化器放顶层，别在函数体里 ofPattern（回收站同样是长列表）
+private val TRASH_TIME_FORMATTER = DateTimeFormatter.ofPattern("MM-dd HH:mm")
+
 private fun formatTime(timestamp: Long): String {
     return Instant.ofEpochMilli(timestamp)
         .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+        .format(TRASH_TIME_FORMATTER)
 }
 
 private fun formatRemaining(doneAt: Long, now: Long): String {

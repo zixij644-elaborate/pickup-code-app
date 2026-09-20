@@ -147,6 +147,15 @@ dependencies {
     // Core KTX
     implementation("androidx.core:core-ktx:1.15.0")
 
+    // Baseline Profile 安装器：把 APK 里打包的 baseline profile 交给系统做 AOT 编译。
+    // - Android 12+（API 31+）系统在安装时自行处理；Android 12 以下必须由本库在首次启动时接手，
+    //   本项目 minSdk=26，所以这条链不能断。
+    // - 实测背景：release 包 status=speed-profile 时冷启动首滑卡顿帧 0.7%，
+    //   而 debug 包 status=verify（ART 不允许 debuggable 包 AOT）时是 34.6%。
+    // - 注意：本库此前已被其它 androidx 库**传递引入**（1.3.1）。这里显式声明只是为了
+    //   声明自己真正依赖它并钉住版本（升到 1.4.1），并不是新增能力——别误以为是它修了卡顿。
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
     // Tests (JUnit 5 — 纯 Kotlin 单元测试，无 Android 依赖)
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
