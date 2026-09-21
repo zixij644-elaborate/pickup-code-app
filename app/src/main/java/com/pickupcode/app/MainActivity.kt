@@ -32,6 +32,7 @@ import com.pickupcode.app.ui.screens.CodeDetailScreen
 import com.pickupcode.app.ui.screens.EditField
 import com.pickupcode.app.ui.screens.DedupScreen
 import com.pickupcode.app.ui.screens.IdentityCodeScreen
+import com.pickupcode.app.ui.screens.RulesScreen
 import com.pickupcode.app.ui.screens.SavedAddressScreen
 import com.pickupcode.app.ui.screens.SettingsScreen
 import com.pickupcode.app.ui.screens.StatsScreen
@@ -50,7 +51,7 @@ class MainActivity : ComponentActivity() {
     // B3: showDuplicate 通知点击后待处理的去重入口跳转（onCreate/onNewIntent 置位，组合期消费）
     private var pendingDedup by mutableStateOf(false)
 
-    enum class Screen { Home, Settings, Detail, Trash, Stats, Dedup, SavedAddress, IdentityCode }
+    enum class Screen { Home, Settings, Detail, Trash, Stats, Dedup, SavedAddress, IdentityCode, Rules }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -137,7 +138,8 @@ class MainActivity : ComponentActivity() {
                     Screen.Settings -> SettingsScreen(
                         onBack = { currentScreen = Screen.Home.name },
                         onStatsClick = { currentScreen = Screen.Stats.name },
-                        onSavedAddressClick = { currentScreen = Screen.SavedAddress.name }
+                        onSavedAddressClick = { currentScreen = Screen.SavedAddress.name },
+                        onRulesClick = { currentScreen = Screen.Rules.name }
                     )
                     Screen.Detail -> DetailScreenWrapper(
                         codeId = selectedCodeId,
@@ -157,6 +159,9 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.IdentityCode -> IdentityCodeScreen(
                         onBack = { currentScreen = Screen.Home.name }
+                    )
+                    Screen.Rules -> RulesScreen(
+                        onBack = { currentScreen = Screen.Settings.name }
                     )
                 }
 

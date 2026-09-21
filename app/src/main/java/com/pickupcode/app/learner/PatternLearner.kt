@@ -520,7 +520,11 @@ private val verifiedAddrLock = Any()
         val sampleCount: Int = 0,
         val lastUsedAt: Long = 0L,
         val decayed: Boolean = false,  // B3: 长期未命中自动降级为「可选」而非强制应用
-        val badCount: Int = 0          // 用户标记不正确的次数，≥3 时自动停用
+        val badCount: Int = 0,         // 用户标记不正确的次数，≥3 时自动停用
+        // 规则来源：自动学习 / 用户手动添加。
+        // 两者**共用同一份存储与同一条识别管线**（用户要求），这里只用于在 UI 上区分标注，
+        // 不影响识别行为——手动加的规则和学来的规则在 CodeExtractor 里一视同仁。
+        val source: String = SOURCE_LEARNED
     )
 
     private const val KEY_LEARNED = "learned_rules"
@@ -586,6 +590,7 @@ private val verifiedAddrLock = Any()
                 put("lastUsedAt", r.lastUsedAt)
                 put("decayed", decayed)
                 put("badCount", r.badCount)
+                put("source", r.source)
             })
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -683,7 +688,8 @@ private val verifiedAddrLock = Any()
                     sampleCount = obj.optInt("sampleCount", 0),
                     lastUsedAt = obj.optLong("lastUsedAt", 0L),
                     decayed = obj.optBoolean("decayed", false),
-                    badCount = obj.optInt("badCount", 0)
+                    badCount = obj.optInt("badCount", 0),
+                    source = obj.optString("source", SOURCE_LEARNED)
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -714,5 +720,272 @@ private val verifiedAddrLock = Any()
             }
             if (changed) saveLearnedPatterns(context, updated)
         }
+    }
+
+    // ===============================================================
+    // 规则管理：用户手动添加 / 编辑 + 内置正则覆盖 + 一键还原
+    //
+    // 设计（按用户要求）：**手动添加的规则和自动学习的规则不冲突、共用同一条管线** ——
+    // 两者都存在下面的 KEY_LEARNED 里（只靠 source 字段区分来源做标注），
+    // CodeExtractor 以完全相同的方式加载它们，不存在两套机制。
+    //
+    // 内置正则**不进**这份存储，而是用「覆盖」管理：只记「哪些被停用」「哪条被改成了什么」，
+    // 原始定义永远留在代码里（CodeExtractor.BUILTIN_RULES）。
+    // 这样「一键还原」＝丢掉覆盖 + 清空自定义规则，天然可回退，改坏了也丢不掉出厂状态。
+    // ===============================================================
+
+    /** 规则来源标记。 */
+    const val SOURCE_LEARNED = "learned"
+    const val SOURCE_USER = "user"
+
+    /**
+     * 把中文输入法常见的全角符号归一化成半角。
+     *
+     * 为什么必须做：正则语法只有 ASCII，但中文输入法会把用户打的 `[` `]` `(` `)` 自动变成全角
+     * `【】（）`（真机实测：输入 `ZQ[0-9]` 存进去是 `ZQ【9】`），用户看到的是"像对的"、存的是错的。
+     * 识别管线里 OCR 文本本来就先经过 [CodeExtractor] 的半角归一化，所以这里不会误伤"想匹配全角字符"的场景。
+     */
+    internal fun normalizeRegexInput(raw: String): String {
+        if (raw.isEmpty()) return raw
+        val sb = StringBuilder(raw.length)
+        for (c in raw) {
+            sb.append(
+                when (c) {
+                    '【', '［' -> '['
+                    '】', '］' -> ']'
+                    '（' -> '('
+                    '）' -> ')'
+                    '｛' -> '{'
+                    '｝' -> '}'
+                    '＼' -> '\\'
+                    '－' -> '-'
+                    '．' -> '.'
+                    '？' -> '?'
+                    '＋' -> '+'
+                    '＊' -> '*'
+                    '｜' -> '|'
+                    '＾' -> '^'
+                    '＄' -> '$'
+                    '　' -> ' '
+                    else -> {
+                        when (c.code) {
+                            in 0xFF10..0xFF19 -> ('0' + (c.code - 0xFF10))   // ０-９
+                            in 0xFF21..0xFF3A -> ('A' + (c.code - 0xFF21))   // Ａ-Ｚ
+                            in 0xFF41..0xFF5A -> ('a' + (c.code - 0xFF41))   // ａ-ｚ
+                            else -> c
+                        }
+                    }
+                }
+            )
+        }
+        return sb.toString()
+    }
+
+    /** 正则校验结果：ok=false 拒绝保存；warning 非空表示能保存但有风险，UI 需提示。 */
+    data class RegexCheck(val ok: Boolean, val warning: String? = null, val error: String? = null)
+
+    /** 会匹配几乎所有文本的正则 —— 放进去等于"什么都当取件码"，直接拒绝。 */
+    private val OVER_BROAD_PATTERNS = listOf(
+        ".*", ".+", ".", "\\s*", "\\w*", "\\W*", "\\d*", "\\S*", "(.*)", "(.+)", "[\\s\\S]*"
+    )
+
+    /**
+     * 校验用户输入的正则。分三档：拒绝（语法错/空/过宽）、可保存但警告（能匹配空串、缺边界）、通过。
+     * 注意：用户规则和自动学习规则一样，**整段匹配值**就是候选码值，所以正则应当只匹配码值本身。
+     */
+    fun validateRegex(raw: String): RegexCheck {
+        val r = normalizeRegexInput(raw).trim()
+        if (r.isEmpty()) return RegexCheck(false, error = "正则不能为空")
+        if (r.length > 200) return RegexCheck(false, error = "正则过长（上限 200 字符）")
+        try {
+            Regex(r)
+        } catch (e: Exception) {
+            return RegexCheck(false, error = "正则语法错误：${e.message?.take(80) ?: "无法编译"}")
+        }
+        if (r in OVER_BROAD_PATTERNS) {
+            return RegexCheck(false, error = "这个正则能匹配几乎所有文本，会让识别失效，已被拒绝")
+        }
+        val warn = when {
+            runCatching { Regex(r).matches("") }.getOrDefault(false) ->
+                "该正则可以匹配空字符串，可能产生空候选"
+            // 与 CodeValidator/CodeExtractor 同一约定：\b 对中文邻接不可靠，应该用显式环视边界
+            !r.contains("(?<") && !r.contains("(?!") ->
+                "建议加上边界 (?<![\\dA-Za-z]) 与 (?![\\dA-Za-z])，避免从更长的数字/字母串里截出一段"
+            else -> null
+        }
+        return RegexCheck(true, warning = warn)
+    }
+
+    /** 新增一条用户手动规则。失败时 [Result.exceptionOrNull] 带可展示的文案。 */
+    @Synchronized
+    fun addUserRule(context: Context, regex: String, type: String, label: String): Result<LearnedRule> {
+        val check = validateRegex(regex)
+        if (!check.ok) return Result.failure(IllegalArgumentException(check.error ?: "正则不合法"))
+        val r = normalizeRegexInput(regex).trim()
+        val rules = getLearnedPatterns(context)
+        if (rules.any { it.regex == r }) return Result.failure(IllegalArgumentException("这条规则已经存在"))
+        val rule = LearnedRule(
+            regex = r,
+            type = normalizeType(type),
+            label = label.trim().ifBlank { "手动规则" }.take(40),
+            count = 0,
+            confidence = 1f,
+            sampleCount = 0,
+            lastUsedAt = System.currentTimeMillis(),
+            source = SOURCE_USER
+        )
+        saveLearnedPatterns(context, rules + rule)
+        return Result.success(rule)
+    }
+
+    /** 编辑一条已有规则（自动学习/手动添加都能改）。oldRegex 用于定位。 */
+    @Synchronized
+    fun updateRule(context: Context, oldRegex: String, newRegex: String, type: String, label: String): Result<LearnedRule> {
+        val check = validateRegex(newRegex)
+        if (!check.ok) return Result.failure(IllegalArgumentException(check.error ?: "正则不合法"))
+        val r = normalizeRegexInput(newRegex).trim()
+        val rules = getLearnedPatterns(context)
+        if (rules.none { it.regex == oldRegex }) return Result.failure(IllegalArgumentException("找不到要修改的规则"))
+        if (rules.any { it.regex == r && it.regex != oldRegex }) {
+            return Result.failure(IllegalArgumentException("这条规则已经存在"))
+        }
+        var updated: LearnedRule? = null
+        val next = rules.map {
+            if (it.regex == oldRegex) {
+                updated = it.copy(
+                    regex = r,
+                    type = normalizeType(type),
+                    label = label.trim().ifBlank { it.label }.take(40),
+                    // 改过之后不再算"衰减"，并清掉自动停用计数，让用户的手工修改立即生效
+                    decayed = false,
+                    badCount = 0
+                )
+                updated!!
+            } else it
+        }
+        saveLearnedPatterns(context, next)
+        return Result.success(updated!!)
+    }
+
+    /** 只允许三种已知类型，其余一律兜底为取件码。 */
+    private fun normalizeType(type: String): String = when (type) {
+        "pickup_food" -> "pickup_food"
+        "coupon" -> "coupon"
+        else -> "pickup_parcel"
+    }
+
+    // ---------------------------------------------------------------
+    // 内置正则的覆盖（停用 / 改写 / 单条还原）
+    // ---------------------------------------------------------------
+
+    private const val KEY_BUILTIN_DISABLED = "builtin_disabled"
+    private const val KEY_BUILTIN_REGEX = "builtin_regex"
+
+    /** 内置规则的用户覆盖：停用的 id 集合 + 改写过正则的 id→正则。 */
+    data class BuiltinOverrides(
+        val disabled: Set<String> = emptySet(),
+        val regexEdits: Map<String, String> = emptyMap()
+    ) {
+        fun isDisabled(id: String) = id in disabled
+        fun regexFor(id: String) = regexEdits[id]
+        val isEmpty: Boolean get() = disabled.isEmpty() && regexEdits.isEmpty()
+    }
+
+    // 内置覆盖的 JSON 编解码抽成纯函数：无 Android 依赖，可直接单测格式与容错
+    internal fun encodeDisabled(disabled: Set<String>): String = JSONArray(disabled.toList()).toString()
+
+    internal fun decodeDisabled(json: String?): Set<String> = try {
+        if (json.isNullOrBlank()) emptySet() else {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { arr.getString(it) }.toSet()
+        }
+    } catch (_: Exception) { emptySet() }
+
+    internal fun encodeRegexEdits(edits: Map<String, String>): String =
+        JSONObject(edits as Map<*, *>).toString()
+
+    internal fun decodeRegexEdits(json: String?): Map<String, String> = try {
+        if (json.isNullOrBlank()) emptyMap() else {
+            val obj = JSONObject(json)
+            obj.keys().asSequence().associateWith { obj.getString(it) }
+        }
+    } catch (_: Exception) { emptyMap() }
+
+    @Synchronized
+    fun getBuiltinOverrides(context: Context): BuiltinOverrides {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return BuiltinOverrides(
+            disabled = decodeDisabled(prefs.getString(KEY_BUILTIN_DISABLED, null)),
+            regexEdits = decodeRegexEdits(prefs.getString(KEY_BUILTIN_REGEX, null))
+        )
+    }
+
+    private fun saveBuiltinOverrides(context: Context, ov: BuiltinOverrides) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_BUILTIN_DISABLED, encodeDisabled(ov.disabled))
+            .putString(KEY_BUILTIN_REGEX, encodeRegexEdits(ov.regexEdits))
+            .apply()
+        builtinCache = null   // 写入即失效热路径缓存
+    }
+
+    /** 停用/启用某条内置正则。 */
+    @Synchronized
+    fun setBuiltinEnabled(context: Context, id: String, enabled: Boolean) {
+        val ov = getBuiltinOverrides(context)
+        val next = if (enabled) ov.disabled - id else ov.disabled + id
+        saveBuiltinOverrides(context, ov.copy(disabled = next))
+    }
+
+    /** 改写某条内置正则；传 null 表示撤掉改写、恢复原始正则。 */
+    @Synchronized
+    fun setBuiltinRegex(context: Context, id: String, regex: String?) {
+        val ov = getBuiltinOverrides(context)
+        val next = ov.regexEdits.toMutableMap()
+        if (regex.isNullOrBlank()) next.remove(id) else next[id] = normalizeRegexInput(regex).trim()
+        saveBuiltinOverrides(context, ov.copy(regexEdits = next))
+    }
+
+    /** 单条内置正则还原（同时清掉停用与改写）。 */
+    @Synchronized
+    fun resetBuiltin(context: Context, id: String) {
+        val ov = getBuiltinOverrides(context)
+        saveBuiltinOverrides(context, BuiltinOverrides(ov.disabled - id, ov.regexEdits - id))
+    }
+
+    /**
+     * 一键还原默认：丢掉**本页能改的一切** —— 内置正则的停用/改写 + 全部自定义规则（自动学习与手动添加）。
+     *
+     * 有意**不碰**：已学习排除词（learned_excludes）、预存地址、常用取件点、识别统计。
+     * 那些不是这个页面能编辑的东西，把它们一起清掉会超出用户点这个按钮时的预期。
+     * 返回 (清掉的自定义规则数, 清掉的内置覆盖数) 供 UI 提示。
+     */
+    @Synchronized
+    fun restoreDefaults(context: Context): Pair<Int, Int> {
+        val ruleCount = getLearnedPatterns(context).size
+        val ov = getBuiltinOverrides(context)
+        val overrideCount = ov.disabled.size + ov.regexEdits.size
+        saveLearnedPatterns(context, emptyList())
+        saveBuiltinOverrides(context, BuiltinOverrides())
+        Log.d(TAG, "一键还原默认：清掉 $ruleCount 条自定义规则、$overrideCount 项内置正则覆盖")
+        return ruleCount to overrideCount
+    }
+
+    /** 是否存在任何用户改动（UI 用来决定"还原默认"按钮要不要高亮）。 */
+    fun hasUserChanges(context: Context): Boolean =
+        getLearnedPatterns(context).isNotEmpty() || !getBuiltinOverrides(context).isEmpty
+
+    // 内置覆盖同样在识别热路径上被读，加 2s TTL 缓存（与 rulesCache 同款做法）
+    @Volatile private var builtinCache: BuiltinOverrides? = null
+    @Volatile private var builtinCacheAt = 0L
+
+    /** 识别热路径用：带 2s TTL 的内置覆盖缓存。 */
+    fun cachedBuiltinOverrides(context: Context): BuiltinOverrides {
+        val now = System.currentTimeMillis()
+        val cached = builtinCache
+        if (cached != null && now - builtinCacheAt < RULES_CACHE_MS) return cached
+        val fresh = getBuiltinOverrides(context)
+        builtinCache = fresh
+        builtinCacheAt = now
+        return fresh
     }
 }

@@ -97,7 +97,8 @@ private data class SettingsCtx(
 fun SettingsScreen(
     onBack: () -> Unit,
     onStatsClick: () -> Unit = {},
-    onSavedAddressClick: () -> Unit = {}
+    onSavedAddressClick: () -> Unit = {},
+    onRulesClick: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     // 进程级 scope：防抖落盘/权限回调等 fire-and-forget 写不随页面销毁取消（否则 400ms 内返回会丢 Key/URL）
@@ -189,6 +190,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             RecognitionSettingsSection(sc)
+            RulesSection(onRulesClick)
             InputMethodsSection(sc)
             NotificationStatusCard(sc)
             VerifyServicesSection(sc)
@@ -484,6 +486,21 @@ private fun NotificationStatusCard(sc: SettingsCtx) {
             Spacer(Modifier.height(8.dp))
             Button(onClick = { openNotificationSettings(ctx) }) { Text("去开启") }
         }
+    }
+}
+
+@Composable
+private fun RulesSection(onRulesClick: () -> Unit) {
+    SettingsSectionCard(
+        title = "识别规则",
+        subtitle = "查看/停用/改写内置正则，也能自己添加规则；改坏了可一键还原"
+    ) {
+        OutlinedButton(
+            onClick = onRulesClick,
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, ValBlue),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = ValBlue)
+        ) { Text("管理识别规则 →") }
     }
 }
 

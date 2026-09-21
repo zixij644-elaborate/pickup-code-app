@@ -210,6 +210,121 @@ object CodeExtractor {
     // Code extraction
     // ---------------------------------------------------------------
 
+    // ===============================================================
+    // 内置正则模式表（供识别 + 「识别规则」页展示/覆盖）
+    //
+    // 为什么要有这张表：以前这些正则是散在代码里的匿名 Regex，用户既看不到也管不了。
+    // 现在给每条一个稳定 id，用户就能停用/改写/还原，而**出厂定义始终留在代码里**——
+    // 用户覆盖只存在 SharedPreferences（见 PatternLearner 的 builtin_disabled / builtin_regex），
+    // 所以「一键还原」＝丢掉覆盖即可，永远不会把默认行为改丢。
+    //
+    // ⚠️ id 一旦发布就不可更改（用户覆盖以 id 为键）；要调整只能新增 id。
+    // ===============================================================
+
+    internal data class BuiltinRule(
+        val id: String,
+        val label: String,
+        val regex: Regex,
+        val type: CodeType,
+        val baseScore: Float = 0f,
+        val ctxBonus: Float = 0f,
+        val sizeBonus: Boolean = false,
+        val pureNum: Boolean = false,
+        val strong: Boolean = false,
+        val requireLocalCtx: Boolean = false,
+        /**
+         * 能否改写正则。评分类规则（下面的 BUILTIN_SCORING_RULES）取整段匹配值当候选，
+         * 改正则只影响"抓什么"，安全；而特殊块（BUILTIN_SPECIAL_RULES）依赖捕获组
+         * （`groupValues[1]/[2]`），改坏了会直接崩，所以只允许停用/还原。
+         */
+        val editable: Boolean = true
+    )
+
+    /** 参与评分的 10 条内置模式。顺序即原有顺序。 */
+    private val BUILTIN_SCORING_RULES: List<BuiltinRule> = listOf(
+        BuiltinRule("THREE_SEGMENT_PARCEL", "三段式取件码（1-2-3456）", THREE_SEGMENT_PARCEL,
+            CodeType.pickup_parcel, SCORE_THREE_SEG, strong = true),
+        BuiltinRule("FOUR_SEGMENT_PARCEL", "四段式取件码（A1-2-3-45）", FOUR_SEGMENT_PARCEL,
+            CodeType.pickup_parcel, SCORE_FOUR_SEG, strong = true),
+        BuiltinRule("LETTER_TWO_SEGMENT_PARCEL", "两段式字母（A-1-234）", LETTER_TWO_SEGMENT_PARCEL,
+            CodeType.pickup_parcel, SCORE_LETTER_TWO_SEG, strong = true),
+        BuiltinRule("LETTER_DASH_FIVE_PARCEL", "字母-数字（D-06003）", LETTER_DASH_FIVE_PARCEL,
+            CodeType.pickup_parcel, SCORE_LETTER_DASH_FIVE, strong = true),
+        BuiltinRule("LETTER_THREE_SEG_PARCEL", "字母三段式（A8-3-3315）", LETTER_THREE_SEG_PARCEL,
+            CodeType.pickup_parcel, SCORE_THREE_SEG, strong = true),
+        BuiltinRule("LETTER_DASH_THREE_PARCEL", "字母+三位数字（A-123）", LETTER_DASH_THREE_PARCEL,
+            CodeType.pickup_parcel, SCORE_LETTER_DASH_THREE, strong = true),
+        // 兔喜式单段码（5-3858）：低分不 strong——同屏有更强段式码时被 top×0.75 过滤
+        BuiltinRule("DIGIT_DASH_PARCEL", "单段式取件码（5-3858）", DIGIT_DASH_PARCEL,
+            CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL),
+        BuiltinRule("LONG_NUMBER_PARCEL", "长数字（6-8位）", LONG_NUMBER_PARCEL,
+            CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL, SCORE_CTX_BONUS),
+        BuiltinRule("LETTER_NUMBER_FOOD", "取餐码（字母+数字）", LETTER_NUMBER_FOOD,
+            CodeType.pickup_food, SCORE_LETTER_NUM_FOOD, SCORE_CTX_BONUS, sizeBonus = true, requireLocalCtx = true),
+        BuiltinRule("PURE_NUMBER_FOOD", "取餐码（纯数字）", PURE_NUMBER_FOOD,
+            CodeType.pickup_food, SCORE_PURE_NUM_FOOD, SCORE_CTX_BONUS, sizeBonus = true, pureNum = true)
+    )
+
+    /** 走独立代码块的特殊模式：停用 = 跳过对应代码块；不支持改写正则（逻辑依赖捕获组）。 */
+    private val BUILTIN_SPECIAL_RULES: List<BuiltinRule> = listOf(
+        BuiltinRule("PREFIXED_CODE", "前缀匹配（取件码: XXX）", PREFIXED_CODE,
+            CodeType.pickup_parcel, SCORE_PREFIXED, strong = true, editable = false),
+        BuiltinRule("NEXT_LINE_CODE", "跨行前缀取码（标签在上一行）", NEXT_LINE_CODE,
+            CodeType.pickup_parcel, SCORE_PREFIXED, strong = true, editable = false),
+        BuiltinRule("LABEL_FOR_CODE", "标签行正下方取码", LABEL_FOR_CODE,
+            CodeType.pickup_parcel, SCORE_PREFIXED, strong = true, editable = false),
+        BuiltinRule("PING_CODE", "凭条号句式（凭 1-6-5020 到…取）", PING_CODE,
+            CodeType.pickup_parcel, SCORE_PREFIXED - PING_BASE_PENALTY, strong = true, editable = false),
+        BuiltinRule("COUPON_NUMBER", "券号（券号: 长数字）", COUPON_NUMBER,
+            CodeType.coupon, SCORE_PREFIXED, strong = true, editable = false)
+    )
+
+    internal val ALL_BUILTIN_RULES: List<BuiltinRule> get() = BUILTIN_SCORING_RULES + BUILTIN_SPECIAL_RULES
+
+    /** 永不匹配的正则。把某条特殊模式替换成它 = 跳过对应代码块（比给每个块加大段 if 缩进更不容易改错）。 */
+    private val NEVER_MATCH = Regex("(?!)")
+
+    /** 供「识别规则」页展示的内置模式快照（已套用用户覆盖）。 */
+    data class BuiltinRuleInfo(
+        val id: String,
+        val label: String,
+        val regex: String,
+        val type: String,
+        val editable: Boolean,
+        val enabled: Boolean,
+        val overridden: Boolean
+    )
+
+    fun builtinRuleInfos(context: Context?): List<BuiltinRuleInfo> {
+        val ov = if (context == null) PatternLearner.BuiltinOverrides()
+                 else PatternLearner.getBuiltinOverrides(context)
+        return ALL_BUILTIN_RULES.map {
+            BuiltinRuleInfo(
+                id = it.id,
+                label = it.label,
+                regex = ov.regexFor(it.id) ?: it.regex.pattern,
+                type = it.type.name,
+                editable = it.editable,
+                enabled = !ov.isDisabled(it.id),
+                overridden = ov.regexFor(it.id) != null
+            )
+        }
+    }
+
+    /**
+     * 取某条内置规则当前生效的正则：优先用户改写版。
+     * 用户把正则改坏（语法错）时**回退到出厂正则**并记警告——识别不能因为一条自定义规则整体失效。
+     */
+    private fun effectiveRegex(rule: BuiltinRule, ov: PatternLearner.BuiltinOverrides): Regex {
+        val edited = ov.regexFor(rule.id) ?: return rule.regex
+        return try {
+            Regex(edited)
+        } catch (_: Exception) {
+            android.util.Log.w("CodeExtractor", "内置规则 ${rule.id} 的自定义正则无法编译，已回退到默认")
+            rule.regex
+        }
+    }
+
     fun extract(lines: List<OCREngine.TextLine>, screenHeight: Int = 0, context: Context? = null, source: String = "screen"): List<ExtractedCode> {
         // 文本预处理：全角→半角归一化 + 词级纠错表（参考同类产品实现 normalizeText / textCorrections）
         val lines = lines.map { it.copy(text = OcrCorrections.apply(normalizeText(it.text))) }
@@ -220,10 +335,21 @@ object CodeExtractor {
         val avgFontHeight = lines.mapNotNull { it.boundingBox?.height()?.toFloat() }
             .takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
 
+        // 用户对内置正则的覆盖（停用 / 改写）。热路径带 2s 缓存，避免每次识别都读盘+解析 JSON。
+        val ov = if (context != null) PatternLearner.cachedBuiltinOverrides(context)
+                 else PatternLearner.BuiltinOverrides()
+        // 特殊模式（依赖捕获组、逻辑与代码绑定）只支持停用 → 换成永不匹配的正则即可跳过
+        fun special(id: String, original: Regex) = if (ov.isDisabled(id)) NEVER_MATCH else original
+        val prefixedCode   = special("PREFIXED_CODE", PREFIXED_CODE)
+        val nextLineCode   = special("NEXT_LINE_CODE", NEXT_LINE_CODE)
+        val labelForCode   = special("LABEL_FOR_CODE", LABEL_FOR_CODE)
+        val pingCode       = special("PING_CODE", PING_CODE)
+        val couponNumber   = special("COUPON_NUMBER", COUPON_NUMBER)
+
         for (i in lines.indices) {
             val line = lines[i]
             // 单行匹配
-            PREFIXED_CODE.find(line.text)?.let { m ->
+            prefixedCode.find(line.text)?.let { m ->
                 // OCR 常把前缀与码值间的连字符读进码值（取件码-12345 → "-12345"），trim 掉首尾 '-' 再校验
                 val code = m.groupValues[2].trim('-')
                 if (hasAdjacentNoise(line.text, m)) return@let
@@ -240,7 +366,7 @@ object CodeExtractor {
                 // 仅当本行以裸前缀字+码开头（件/餐/货/单+码）且无空格分隔，才尝试拼接上一行尾字
                 if (line.text.trim().matches(JOINED_PREFIX_CODE)) {
                     val joined = prev.takeLast(1) + line.text.trim()
-                    PREFIXED_CODE.find(joined)?.let { m ->
+                    prefixedCode.find(joined)?.let { m ->
                         val code = m.groupValues[2].trim('-')
                         if (isValidStrongContextCode(code)) {
                             val p = m.groupValues[1]
@@ -260,7 +386,7 @@ object CodeExtractor {
                 // 下一行是订单页 UI 文案（如"202 查看订单详情>"）时不走跨行前缀路径，避免抓错行
                 if (NEXT_LINE_UI_NOISE.containsMatchIn(nextLine)) continue
                 // Match pure numbers or letter-dash-number codes on the next line
-                val nextMatch = NEXT_LINE_CODE.find(nextLine)
+                val nextMatch = nextLineCode.find(nextLine)
                 if (nextMatch != null && !hasAdjacentNoise(nextLine, nextMatch) &&
                     isValidStrongContextCode(nextMatch.groupValues[1].trim('-'))) {
                     val code = nextMatch.groupValues[1].trim('-')
@@ -276,7 +402,7 @@ object CodeExtractor {
         // OCR 行数组顺序不可靠——地图/浮层标签会插进标签与码值之间，"数组下一行"规则会漏掉真实码。
         // 真机案例：美团外卖配送页「取餐号」在 y=803，唯一真实码 WJO01 在 y=843，而中间隔了 4 个数组下标。
         for ((i, labelLine) in lines.withIndex()) {
-            val labelMatch = LABEL_FOR_CODE.find(labelLine.text.trim()) ?: continue
+            val labelMatch = labelForCode.find(labelLine.text.trim()) ?: continue
             val token = nearestWholeLineCodeBelow(lines, i) ?: continue
             if (!isValidStrongContextCode(token)) continue
             val isFood = labelMatch.value.contains("餐") || labelMatch.value.contains("单")
@@ -296,7 +422,7 @@ object CodeExtractor {
 
         // 凭条号句式（凭1-6-5020到...取）：菜鸟驿站/快递柜典型通知，优先且绕过 food 上下文干扰
         for (line in lines) {
-            PING_CODE.findAll(line.text).forEach matchLoop@{ m ->
+            pingCode.findAll(line.text).forEach matchLoop@{ m ->
                 val code = m.groupValues[1].trim('-')
                 if (hasAdjacentNoise(line.text, m) || !isValidStrongContextCode(code) || code.length < 2) return@matchLoop
                 var s = SCORE_PREFIXED - PING_BASE_PENALTY
@@ -312,7 +438,7 @@ object CodeExtractor {
         // 15 位团购券号必被拒）；用 内容噪声检查 + 6..20 位纯数字 独立校验。
         // 类型固定 coupon：受"券码识别"开关控制，无到期提醒，与二维码券码同通道。
         for (line in lines) {
-            COUPON_NUMBER.findAll(line.text).forEach { m ->
+            couponNumber.findAll(line.text).forEach { m ->
                 val digits = m.groupValues[1].replace(Regex("[\\s·.]"), "")
                 if (digits.length in 6..20 && digits.all { it.isDigit() } &&
                     !CodeValidator.isContentNoise(digits)) {
@@ -322,20 +448,17 @@ object CodeExtractor {
             }
         }
 
-        val rules = mutableListOf(
-            Rule(THREE_SEGMENT_PARCEL, CodeType.pickup_parcel, SCORE_THREE_SEG, strong = true),
-            Rule(FOUR_SEGMENT_PARCEL, CodeType.pickup_parcel, SCORE_FOUR_SEG, strong = true),
-            Rule(LETTER_TWO_SEGMENT_PARCEL, CodeType.pickup_parcel, SCORE_LETTER_TWO_SEG, strong = true),
-            Rule(LETTER_DASH_FIVE_PARCEL, CodeType.pickup_parcel, SCORE_LETTER_DASH_FIVE, strong = true),
-            Rule(LETTER_THREE_SEG_PARCEL, CodeType.pickup_parcel, SCORE_THREE_SEG, strong = true),
-            Rule(LETTER_DASH_THREE_PARCEL, CodeType.pickup_parcel, SCORE_LETTER_DASH_THREE, strong = true),
-            // 兔喜式单段码（5-3858）：低分不 strong——同屏有更强段式码时被 top×0.75 过滤，
-            // 防 "1-6-5020" 的子串 "6-5020" 被误抓；带"取件码为"前缀的走 PREFIXED_CODE 高分强路径。
-            Rule(DIGIT_DASH_PARCEL, CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL),
-            Rule(LONG_NUMBER_PARCEL, CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL, SCORE_CTX_BONUS),
-            Rule(LETTER_NUMBER_FOOD, CodeType.pickup_food, SCORE_LETTER_NUM_FOOD, SCORE_CTX_BONUS, true, requireLocalCtx = true),
-            Rule(PURE_NUMBER_FOOD, CodeType.pickup_food, SCORE_PURE_NUM_FOOD, SCORE_CTX_BONUS, true, true)
-        )
+        // 评分类规则由内置表生成：跳过被用户停用的，正则取用户改写版（改坏了自动回退到出厂版）
+        val rules = mutableListOf<Rule>()
+        for (b in BUILTIN_SCORING_RULES) {
+            if (ov.isDisabled(b.id)) continue
+            rules.add(
+                Rule(
+                    effectiveRegex(b, ov), b.type, b.baseScore, b.ctxBonus, b.sizeBonus, b.pureNum,
+                    strong = b.strong, requireLocalCtx = b.requireLocalCtx
+                )
+            )
+        }
 
         // Load auto-learned patterns
         // B3: 记住"编译后 pattern -> 存储用 regex 字符串"，命中时用来 touchRule 刷新 lastUsedAt
@@ -355,7 +478,12 @@ object CodeExtractor {
                 if (!rule.enabled || rule.badCount >= 3) continue
                 try {
                     val regex = Regex(rule.regex)
-                    val type = if (rule.type == "pickup_food") CodeType.pickup_food else CodeType.pickup_parcel
+                    // 三种类型都支持：自动学习只会产出 parcel/food，但**用户手动添加**的规则可以是券码
+                    val type = when (rule.type) {
+                        "pickup_food" -> CodeType.pickup_food
+                        "coupon" -> CodeType.coupon
+                        else -> CodeType.pickup_parcel
+                    }
                     // 已学规则基础分低；B3: 若已衰减(超期未用)则进一步压到极低分，仍参与但不抢先，
                     // 若后续真实被用到会经 touchRule 解除衰减 —— 让衰减可自愈，而非单向永久弃用。
                     val base = if (rule.decayed) SCORE_LEARNED_DECAYED_BASE else SCORE_LEARNED_BASE
