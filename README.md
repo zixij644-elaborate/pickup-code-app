@@ -77,7 +77,7 @@
 | app-arm64-v8a-release.apk | 大部分新手机（含 vivo/小米等 arm64 机型） | [下载](https://github.com/zixij644-elaborate/pickup-code-app/releases/latest/download/app-arm64-v8a-release.apk) |
 | app-armeabi-v7a-release.apk | 较老 32 位设备 | [下载](https://github.com/zixij644-elaborate/pickup-code-app/releases/latest/download/app-armeabi-v7a-release.apk) |
 
-不确定选哪个？近几年的手机基本都是 arm64-v8a。每个 Release 都附带 SHA-256 校验文件。
+ > 不确定选哪个？近几年的手机基本都是 arm64-v8a。每个 Release 都附带 SHA-256 校验文件。
 
 ## 快速开始
 
