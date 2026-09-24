@@ -54,7 +54,7 @@ object CodeExtractor {
     private const val LABEL_GAP_MIN_PX = 48
     /**
      * 餐饮"局部证据"标签：字母+数字码不能只靠"全屏某处出现取餐"就采信
-     * （真机反例：高德/美团地图上的沪常高速编号 S26，同一屏有「取餐号」但相隔 13 行 / 纵向 400px）。
+     * （真机反例：高德/美团地图上的长兴高速编号 S26，同一屏有「取餐号」但相隔 13 行 / 纵向 400px）。
      */
     private val FOOD_LABEL_LOCAL = Regex("(取[餐单][码号]|排号|请取餐|正在制作|等待取餐|取餐)")
     private const val FOOD_LABEL_WINDOW_LINES = 2
@@ -703,7 +703,7 @@ object CodeExtractor {
      * - 本行含餐饮关键词（如「取餐码 A12」）
      * - 本行字体明显偏大（大号取餐号）
      * - 前后 ±[FOOD_LABEL_WINDOW_LINES] 行内出现餐饮标签（跨行取餐号）
-     * 反例：美团外卖地图页的 S26（沪常高速编号）离最近的「取餐号」13 行、纵向 400px。
+     * 反例：美团外卖地图页的 S26（长兴高速编号）离最近的「取餐号」13 行、纵向 400px。
      */
     private fun hasLocalFoodSignal(
         lines: List<OCREngine.TextLine>,
