@@ -295,6 +295,26 @@ object CodeExtractor {
         val overridden: Boolean
     )
 
+    /**
+     * 这条码值是否**已经能被内置评分正则抓到**（已套用用户对内置正则的停用/改写）。
+     *
+     * 用途：用户确认一个码值"是对的"时，判断要不要把它学成新规则 ——
+     * 内置本来就能抓到的形状，学了也不会被用上（自学习规则基础分只有 65，永远抢不过内置），
+     * 只会往规则表里堆一条永远命不中的垃圾规则。所以这种一律不学。
+     *
+     * 注意只检查**评分规则**：前缀/凭条号/券号那几个特殊模式依赖周围标签文本，
+     * 单独一个码值字符串本来就不会被它们匹配，不构成"已覆盖"。
+     */
+    internal fun builtinCovers(code: String, context: Context? = null): Boolean {
+        if (code.isBlank()) return false
+        val ov = if (context == null) PatternLearner.BuiltinOverrides()
+                 else PatternLearner.cachedBuiltinOverrides(context)
+        return BUILTIN_SCORING_RULES.any { b ->
+            if (ov.isDisabled(b.id)) return@any false
+            runCatching { effectiveRegex(b, ov).containsMatchIn(code) }.getOrDefault(false)
+        }
+    }
+
     fun builtinRuleInfos(context: Context?): List<BuiltinRuleInfo> {
         val ov = if (context == null) PatternLearner.BuiltinOverrides()
                  else PatternLearner.getBuiltinOverrides(context)

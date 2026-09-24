@@ -738,6 +738,9 @@ private val verifiedAddrLock = Any()
     const val SOURCE_LEARNED = "learned"
     const val SOURCE_USER = "user"
 
+    /** 来源：用户在详情页确认/亲手改了码值 → 按它建出来的规则（强证据，1 条即成规）。 */
+    const val SOURCE_VERIFIED = "verified"
+
     /**
      * 把中文输入法常见的全角符号归一化成半角。
      *
@@ -872,6 +875,97 @@ private val verifiedAddrLock = Any()
         "pickup_food" -> "pickup_food"
         "coupon" -> "coupon"
         else -> "pickup_parcel"
+    }
+
+    // ---------------------------------------------------------------
+    // 用户确认通道：比"同形状出现 3 次"强得多的正面证据
+    //
+    // 背景（2026-09-24）：自动学习只在**完全没抓到码**时才触发，且要求"同一形状在 ≥3 条
+    // **不同文本**里出现"才敢成规——阈值定这么高，是因为"误学"的代价远大于"漏学"
+    // （误学会把噪声永久当取件码并主动弹通知）。
+    // 但有一类样本本来就带着强证据：**用户亲自确认或亲手改写的码值**。
+    // 它不需要 3 次、不需要聚类，1 条即可成规 —— 这就是本段实现的东西。
+    // ---------------------------------------------------------------
+
+    /** 用户确认/修正一个码值时的学习判定结果（纯逻辑，无 Android 依赖，可直接单测）。 */
+    internal sealed interface VerifiedDecision {
+        /** 不建规则：形状已被覆盖（学了也用不上），或这个值不适合拿来学。 */
+        object Skip : VerifiedDecision
+        /** 已有自定义规则同形：续命即可（清衰减），不重复建规则。 */
+        data class Refresh(val regex: String) : VerifiedDecision
+        /** 形状未被覆盖且内置抓不到：直接建规则。 */
+        data class Add(val regex: String, val token: String, val label: String) : VerifiedDecision
+    }
+
+    /**
+     * 判定"用户确认的这个码值"该怎么学。
+     *
+     * @param existingRegexes 现有自定义规则的 regex 集合
+     * @param builtinCovers   这条码值是否**已经能被内置评分正则抓到**
+     *
+     * 顺序有讲究：先看已有自定义规则（同形 → 续命），再看内置（已覆盖 → 不学），最后才建新规则。
+     */
+    internal fun decideVerified(code: String, existingRegexes: Set<String>, builtinCovers: Boolean): VerifiedDecision {
+        val c = code.trim()
+        if (c.length !in 2..20) return VerifiedDecision.Skip
+        val tok = tokenize(c)
+        if (tok.isBlank()) return VerifiedDecision.Skip
+        // 过宽守卫：与 autoApply 同一套 —— 含 X（任意字符）的 token 会匹配任何文本，绝不能成规
+        if (tok.any { it != 'd' && it != 'L' && it != '-' && it != '_' && it != ' ' && it != '.' && !it.isDigit() }) {
+            return VerifiedDecision.Skip
+        }
+        val regex = tokenToRegex(tok)
+        if (regex in existingRegexes) return VerifiedDecision.Refresh(regex)
+        if (builtinCovers) return VerifiedDecision.Skip
+        return VerifiedDecision.Add(regex, tok, humanLabel(tok))
+    }
+
+    /**
+     * 用户确认（或修正）了一个**真实取件码** → 立刻按它建一条规则（若这种形状我们原本抓不到）。
+     *
+     * 三条守卫（避免制造垃圾规则）：
+     *  1. 内置正则本来就能抓到这种形状 → 不学：学了也不会被用上，只会堆一条永远命不中的规则；
+     *  2. 已有自定义规则同形 → 只续命（刷 `lastUsedAt`、清衰减），不重复建；
+     *  3. 形状新且内置抓不到 → 立刻建规则，来源标 [SOURCE_VERIFIED]（规则页显示"已确认"）。
+     *
+     * @return 新建的规则；无需新建时返回 null。
+     */
+    @Synchronized
+    fun learnFromConfirmedCode(context: Context, code: String, type: String): LearnedRule? {
+        val existing = getLearnedPatterns(context)
+        val decision = decideVerified(
+            code = code,
+            existingRegexes = existing.map { it.regex }.toSet(),
+            builtinCovers = com.pickupcode.app.extractor.CodeExtractor.builtinCovers(code, context)
+        )
+        return when (decision) {
+            VerifiedDecision.Skip -> null
+            is VerifiedDecision.Refresh -> {
+                saveLearnedPatterns(context, existing.map {
+                    if (it.regex == decision.regex) {
+                        it.copy(lastUsedAt = System.currentTimeMillis(), decayed = false)
+                    } else it
+                })
+                null
+            }
+            is VerifiedDecision.Add -> {
+                val rule = LearnedRule(
+                    regex = decision.regex,
+                    type = normalizeType(type),
+                    label = decision.label,
+                    count = 1,
+                    confidence = 1f,
+                    sampleCount = 1,
+                    lastUsedAt = System.currentTimeMillis(),
+                    source = SOURCE_VERIFIED
+                )
+                saveLearnedPatterns(context, existing + rule)
+                if (com.pickupcode.app.BuildConfig.DEBUG) {
+                    Log.d(TAG, "用户确认通道：新增规则 ${rule.regex}[${rule.type}]")
+                }
+                rule
+            }
+        }
     }
 
     // ---------------------------------------------------------------

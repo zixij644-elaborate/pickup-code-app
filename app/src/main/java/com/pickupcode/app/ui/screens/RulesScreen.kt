@@ -427,14 +427,23 @@ private fun MyRuleRow(
                             onClick = {},
                             label = {
                                 Text(
-                                    if (rule.source == PatternLearner.SOURCE_USER) "手动" else "自动学习",
+                                    when (rule.source) {
+                                        PatternLearner.SOURCE_USER -> "手动"
+                                        PatternLearner.SOURCE_VERIFIED -> "已确认"
+                                        else -> "自动学习"
+                                    },
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             },
                             colors = AssistChipDefaults.assistChipColors(
-                                containerColor = if (rule.source == PatternLearner.SOURCE_USER)
+                                // 「手动」与「已确认」都源自用户动作（强证据），用同一强调色；自动学习用中性色
+                                containerColor = if (rule.source == PatternLearner.SOURCE_USER ||
+                                    rule.source == PatternLearner.SOURCE_VERIFIED
+                                ) {
                                     MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                }
                             )
                         )
                         if (rule.badCount >= 3) {

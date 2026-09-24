@@ -111,7 +111,14 @@ fun CodeDetailScreen(
         ) {
             // 2026-09-15 用户要求：删掉「类型」卡片（码值类型在主页列表已有筛选/徽标体现，详情页里冗余）
             EditableField(label = "码值", value = item.code, displayFontSize = 28.sp, displayFontWeight = FontWeight.Bold,
-                onSave = { onUpdateField(EditField.CODE, it) })
+                onSave = { newCode ->
+                    onUpdateField(EditField.CODE, newCode)
+                    // 用户亲手把它改成这个值 = 强正面证据：若这种形状我们原本抓不到，顺手学成规则
+                    // （内置已能抓到的形状会被 learnFromConfirmedCode 内部跳过，不会堆垃圾规则）
+                    scope.launch(Dispatchers.IO) {
+                        PatternLearner.learnFromConfirmedCode(ctx, newCode, item.type)
+                    }
+                })
             if (item.isActive) {
                 InlineConfirm("码值正确", confirmed = confirmState.codeConfirmed, incorrect = confirmState.codeIncorrect,
                     onCorrect = {
@@ -119,6 +126,8 @@ fun CodeDetailScreen(
                         PatternLearner.setCodeConfirmed(ctx, item.id, true)
                         scope.launch(Dispatchers.IO) {
                             PatternLearner.recordVerified(ctx, CodeValidator.getPatternId(item.code))
+                            // 用户确认"这个码是对的" → 1 条即成规（详见 PatternLearner 的"用户确认通道"）
+                            PatternLearner.learnFromConfirmedCode(ctx, item.code, item.type)
                         }
                     },
                     onIncorrect = {
@@ -335,7 +344,10 @@ fun CodeDetailScreen(
                     if (!confirmState.codeConfirmed && !confirmState.codeIncorrect) {
                         confirmState = confirmState.copy(codeConfirmed = true)
                         PatternLearner.setCodeConfirmed(ctx, item.id, true)
-                        scope.launch(Dispatchers.IO) { PatternLearner.recordVerified(ctx, CodeValidator.getPatternId(item.code)) }
+                        scope.launch(Dispatchers.IO) {
+                            PatternLearner.recordVerified(ctx, CodeValidator.getPatternId(item.code))
+                            PatternLearner.learnFromConfirmedCode(ctx, item.code, item.type)
+                        }
                     }
                     if (!confirmState.sourceConfirmed && !confirmState.sourceIncorrect) {
                         confirmState = confirmState.copy(sourceConfirmed = true)

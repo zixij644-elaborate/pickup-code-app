@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -190,5 +191,70 @@ class RuleManagementTest {
         }
         // 兜底分支的 id 也要在表里
         assertTrue(CodeValidator.classifyFormat("取件码ABC") in builtinIds, "兜底 id 不在内置表里")
+    }
+
+    // ---------------------------------------------------------------
+    // 用户确认通道：比"同形状出现 3 次"强得多的正面证据 → 1 条即成规
+    // ---------------------------------------------------------------
+
+    @Test
+    @DisplayName("用户确认的码，内置抓不到 → 立刻建规则（不需要累计 3 次）")
+    fun confirmedCodeUncoveredByBuiltinBecomesRule() {
+        val d = PatternLearner.decideVerified("ZQ123456", emptySet(), builtinCovers = false)
+        assertTrue(d is PatternLearner.VerifiedDecision.Add, "应建规则，实际=$d")
+        val add = d as PatternLearner.VerifiedDecision.Add
+        // 与自动学习同一套边界约定：显式环视，不用 \b（\b 在中文邻接下会漏抓）
+        assertTrue(add.regex.startsWith("(?<![\\dA-Za-z])"), add.regex)
+        assertTrue(add.regex.endsWith("(?![\\dA-Za-z])"), add.regex)
+        assertTrue(
+            Regex(add.regex).containsMatchIn("取件码ZQ123456到长兴路"),
+            "码值紧贴中文时必须命中：${add.regex}"
+        )
+    }
+
+    @Test
+    @DisplayName("内置正则本来就能抓到的形状：不学（学了也用不上，只会堆垃圾规则）")
+    fun confirmedCodeCoveredByBuiltinIsSkipped() {
+        assertSame(
+            PatternLearner.VerifiedDecision.Skip,
+            PatternLearner.decideVerified("1-6-5020", emptySet(), builtinCovers = true)
+        )
+        assertSame(
+            PatternLearner.VerifiedDecision.Skip,
+            PatternLearner.decideVerified("ZQ123456", emptySet(), builtinCovers = true),
+            "即使形状新，只要内置已覆盖也不该建规则"
+        )
+    }
+
+    @Test
+    @DisplayName("已有同形自定义规则：只续命，不重复建")
+    fun confirmedCodeMatchingExistingRuleRefreshes() {
+        val add = PatternLearner.decideVerified("ZQ123456", emptySet(), false)
+            as PatternLearner.VerifiedDecision.Add
+        // 同形状的另一个码值 → 应命中同一条规则（说明 tokenize 的泛化生效）
+        val again = PatternLearner.decideVerified("ZQ999888", setOf(add.regex), builtinCovers = false)
+        assertTrue(again is PatternLearner.VerifiedDecision.Refresh, "应续命，实际=$again")
+        assertEquals(add.regex, (again as PatternLearner.VerifiedDecision.Refresh).regex)
+    }
+
+    @Test
+    @DisplayName("不可用的值一律不学：含 X（任意字符）的 token、过短、过长、空白")
+    fun unusableConfirmedValuesAreSkipped() {
+        listOf("#-1234", "A", "1234567890123456789012", "   ").forEach {
+            assertSame(
+                PatternLearner.VerifiedDecision.Skip,
+                PatternLearner.decideVerified(it, emptySet(), builtinCovers = false),
+                "「$it」不该成规"
+            )
+        }
+    }
+
+    @Test
+    @DisplayName("builtinCovers：内置能抓的为 true，抓不到的为 false")
+    fun builtinCoversDetectsCoveredShapes() {
+        assertTrue(CodeExtractor.builtinCovers("1-6-5020"), "三段式应被内置覆盖")
+        assertTrue(CodeExtractor.builtinCovers("5-3858"), "单段式应被内置覆盖")
+        assertFalse(CodeExtractor.builtinCovers("ZQ123456"), "字母+6位数字内置抓不到")
+        assertFalse(CodeExtractor.builtinCovers(""), "空串不算覆盖")
     }
 }
