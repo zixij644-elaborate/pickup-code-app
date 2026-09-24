@@ -7,9 +7,9 @@ import org.junit.jupiter.api.DisplayName
 class CodeValidatorTest {
 
     @Test
-    @DisplayName("valid three-segment (1-6-5020)")
+    @DisplayName("valid three-segment (3-7-4162)")
     fun valid_threeSegment() {
-        assertTrue(CodeValidator.isValidPickupCode("1-6-5020"))
+        assertTrue(CodeValidator.isValidPickupCode("3-7-4162"))
         assertTrue(CodeValidator.isValidPickupCode("99-12-123456"))
     }
 
@@ -20,9 +20,9 @@ class CodeValidatorTest {
     }
 
     @Test
-    @DisplayName("valid 兔喜式单段码 (5-3858 / 12-3456)")
+    @DisplayName("valid 兔喜式单段码 (7-2914 / 12-3456)")
     fun valid_digitDashSegment() {
-        assertTrue(CodeValidator.isValidPickupCode("5-3858"))
+        assertTrue(CodeValidator.isValidPickupCode("7-2914"))
         assertTrue(CodeValidator.isValidPickupCode("12-3456"))
         assertTrue(CodeValidator.isValidPickupCode("8-2014"))
     }
@@ -85,7 +85,7 @@ class CodeValidatorTest {
     fun manualParcelShortDigits() {
         assertFalse(CodeValidator.isValidManualCode("123", "pickup_parcel"))
         assertFalse(CodeValidator.isValidManualCode("42", "pickup_parcel"))
-        assertTrue(CodeValidator.isValidManualCode("5-3858", "pickup_parcel"))
+        assertTrue(CodeValidator.isValidManualCode("7-2914", "pickup_parcel"))
         assertTrue(CodeValidator.isValidManualCode("10-2-7507", "pickup_parcel"))
     }
 
@@ -112,9 +112,9 @@ class CodeValidatorTest {
     @Test
     @DisplayName("classifyFormat returns stable IDs")
     fun format_stable() {
-        assertEquals("THREE_SEGMENT_PARCEL", CodeValidator.getPatternId("1-6-5020"))
+        assertEquals("THREE_SEGMENT_PARCEL", CodeValidator.getPatternId("3-7-4162"))
         assertEquals("LONG_NUMBER_PARCEL", CodeValidator.getPatternId("281849"))
         assertEquals("PREFIXED_CODE", CodeValidator.getPatternId("ABC"))
-        assertEquals("DIGIT_DASH_PARCEL", CodeValidator.getPatternId("5-3858"))
+        assertEquals("DIGIT_DASH_PARCEL", CodeValidator.getPatternId("7-2914"))
     }
 }

@@ -93,10 +93,10 @@ class SmsReceiver : BroadcastReceiver() {
                         .filter { it.confidence >= settings.confidenceThreshold && isTypeEnabled(it.type, settings) }
                         .toMutableList()
 
-                    // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 5-3858）由 AI 补上。
+                    // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 7-2914）由 AI 补上。
                     // 广播限时 8s——AI 只等「剩余预算」：正则没结果时多等一会（AI 是唯一希望），
                     // 有结果时少等；超时/失败直接用正则结果，绝不拖死短信识别。
-                    // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 5-3858）由 AI 补上。
+                    // AI 补识别（与无障碍/分享路径对齐）：正则漏掉的码（如兔喜 7-2914）由 AI 补上。
                     // 短信没有图片，只能走文本通道；AI 返回的地址/柜号同样用于后续填空。
                     val aiAddressHints = mutableMapOf<String, String>()
                     val aiCabinetHints = mutableMapOf<String, String>()

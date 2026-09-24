@@ -1,9 +1,10 @@
 # id: parcel-letter-3seg
 # source: screen
-# note: 字母前缀三段式 A8-3-3315（无「取件码」前缀，走 LETTER_THREE_SEG）；断言子串 3-3315 不被单独抓出
+# note: 字母前缀三段式 B6-2-7041（无「取件码」前缀，走 LETTER_THREE_SEG）；断言子串 2-7041 不被单独抓出
+#   注：本条语料的码值/运单号/电话为同形态合成值（2026-09-24 脱敏）——真实取件凭证不进公开仓库，形态与 OCR 噪声保留，回归效力相同。
 L - - - - - 菜鸟驿站
-L - - - - - 包裹已到，货架号 A8-3-3315
+L - - - - - 包裹已到，货架号 B6-2-7041
 
-E code pickup_parcel A8-3-3315
-E forbid 3-3315
+E code pickup_parcel B6-2-7041
+E forbid 2-7041
 E station 菜鸟驿站

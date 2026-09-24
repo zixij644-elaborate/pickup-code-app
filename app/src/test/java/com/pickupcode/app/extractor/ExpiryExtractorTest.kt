@@ -36,7 +36,7 @@ class ExpiryExtractorTest {
 
     @Test
     fun `extractExpiryText 无时限返回 null`() {
-        assertNull(ExpiryExtractor.extractExpiryText("凭1-6-5020到驿站取件"))
+        assertNull(ExpiryExtractor.extractExpiryText("凭3-7-4162到驿站取件"))
         assertNull(ExpiryExtractor.extractExpiryText(""))
     }
 
@@ -143,7 +143,7 @@ class ExpiryExtractorTest {
 
     @Test
     fun `expiryTimeFor 快递无文本时限回退默认72小时`() {
-        val r = ExpiryExtractor.expiryTimeFor("凭1-6-5020到驿站取件", CodeExtractor.CodeType.pickup_parcel, baseMs)
+        val r = ExpiryExtractor.expiryTimeFor("凭3-7-4162到驿站取件", CodeExtractor.CodeType.pickup_parcel, baseMs)
         assertEquals(baseMs + ExpiryExtractor.DEFAULT_PARCEL_LIFETIME_MS, r)
     }
 

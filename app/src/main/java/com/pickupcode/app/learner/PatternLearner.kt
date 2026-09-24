@@ -322,7 +322,7 @@ object PatternLearner {
             "d1-d1-d4" -> "rack-shelf-slot (A-B-CCCC)"
             "d1-d1-d5" -> "rack-shelf-slot (A-B-CCCCC)"
             "d2-d1-d4" -> "rack-shelf-slot (AA-B-CCCC)"
-            "L1-d5" -> "letter-5digit (like D-06003)"
+            "L1-d5" -> "letter-5digit (like H-24137)"
             "L1-d6" -> "letter-6digit"
             "L2-d5" -> "2letter-5digit"
             "d5" -> "5-digit code"
@@ -331,9 +331,9 @@ object PatternLearner {
             "L1-d2-d3" -> "letter-digit-digit (A-1-234)"
             "L1-d1-d4" -> "letter-digit-4digit"
             "d-d-d" -> "digit-dash-dash (1-2-3)"
-            "d-d-d4" -> "digit-dash-4digit (1-6-5020)"
+            "d-d-d4" -> "digit-dash-4digit (3-7-4162)"
             "d-d-d5" -> "digit-dash-5digit"
-            "Ld-d-d4" -> "letter-digit-dash-4digit (A8-3-3315)"
+            "Ld-d-d4" -> "letter-digit-dash-4digit (B6-2-7041)"
             else -> tok
         }
     }
@@ -344,7 +344,7 @@ object PatternLearner {
 
     /**
      * 自动生成正则的边界。用显式环视而非 \b——Android(ICU) 的 \b 把中文当词字符，
-     * 码值紧贴中文时（如 "749019复制"）边界失效导致漏抓；与 CodeValidator/CodeExtractor 同一约定。
+     * 码值紧贴中文时（如 "306284复制"）边界失效导致漏抓；与 CodeValidator/CodeExtractor 同一约定。
      */
     private const val BOUNDARY_LEFT = "(?<![\\dA-Za-z])"
     private const val BOUNDARY_RIGHT = "(?![\\dA-Za-z])"

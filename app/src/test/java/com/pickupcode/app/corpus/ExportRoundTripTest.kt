@@ -21,8 +21,8 @@ class ExportRoundTripTest {
         RecognitionDebugStore.clear()
         val lines = listOf(
             OCREngine.TextLine("取件码", OCREngine.LineBox(100, 900, 300, 960), 0.95f),
-            OCREngine.TextLine("1-6-5020", OCREngine.LineBox(100, 980, 420, 1068), 0.96f),
-            OCREngine.TextLine("凭1-6-5020到长兴路北段店取您的快递", OCREngine.LineBox(100, 1100, 1000, 1148), 0.9f)
+            OCREngine.TextLine("3-7-4162", OCREngine.LineBox(100, 980, 420, 1068), 0.96f),
+            OCREngine.TextLine("凭3-7-4162到长兴路北段店取您的快递", OCREngine.LineBox(100, 1100, 1000, 1148), 0.9f)
         )
         val allText = lines.joinToString(" ") { it.text }
         val results = CodeExtractor.extract(lines, 2400, context = null, source = "screen")
@@ -36,7 +36,7 @@ class ExportRoundTripTest {
             finalResults = results.map {
                 RecognitionDebugStore.CandidateInfo(
                     code = it.code, score = it.confidence * 100, type = it.type.name,
-                    source = it.source, lineIndex = 1, context = "1-6-5020"
+                    source = it.source, lineIndex = 1, context = "3-7-4162"
                 )
             }
         )
@@ -46,7 +46,7 @@ class ExportRoundTripTest {
 
         val text = RecognitionDebugStore.exportFixture()
         assertNotNull(text, "有快照时必须能导出")
-        assertTrue(text!!.contains("E code pickup_parcel 1-6-5020"), "导出应含期望码行:\n$text")
+        assertTrue(text!!.contains("E code pickup_parcel 3-7-4162"), "导出应含期望码行:\n$text")
 
         val tmp = File.createTempFile("export-roundtrip", ".txt")
         try {
@@ -56,7 +56,7 @@ class ExportRoundTripTest {
             assertEquals(2400, parsed.screenHeight)
             assertEquals(3, parsed.lines.size, "OCR 行应完整往返")
             assertEquals(OCREngine.LineBox(100, 900, 300, 960), parsed.lines[0].boundingBox, "坐标应无损往返")
-            assertEquals(listOf("1-6-5020"), parsed.expectedCodes.map { it.code })
+            assertEquals(listOf("3-7-4162"), parsed.expectedCodes.map { it.code })
             assertEquals(CodeExtractor.CodeType.pickup_parcel, parsed.expectedCodes[0].type)
             assertEquals("长兴路北段店", parsed.expectedAddress)
             assertEquals("2号柜", parsed.expectedCabinet)

@@ -32,7 +32,7 @@ object AddressExtractor {
     // 「地址:」标签标记（S0b 与 extractAddressForCode 共用）
     private val REG_ADDR_LABEL_MARK = Regex("地址[:：]")
 
-    /** 快递运单号行（品牌+快递后缀+冒号/空格+兴数字串），如 中通快递:79130792810099——非地址。 */
+    /** 快递运单号行（品牌+快递后缀+冒号/空格+兴数字串），如 中通快递:79152640318774——非地址。 */
     private val COURIER_TRACKING_LINE = Regex("(?:快递|速递|物流|速运|驿站|智能柜)[:：]?\\s*\\d{9,}")
 
     // ---------------------------------------------------------------
@@ -137,7 +137,7 @@ object AddressExtractor {
     )
     val isCouponContext = couponContext.any { allText.contains(it) }
     if (isCouponContext && st.fullAddress.isEmpty()) {
-        // 优先扫描逐行，找"品牌名(店名)"格式（蜜雪冰城(老十字街店) / 德克士(郸械万果园店)）
+        // 优先扫描逐行，找"品牌名(店名)"格式（蜜雪冰城(老十字街店) / 德克士(安平万果园店)）
         // 注意：括号字符类易触发 ICU 正则"incorrectly nested parentheses"，
         // 故不用单条大正则，改用简单匹配 + 字符串定位，稳妥且兼容。
         var couponAddr = ""
@@ -188,7 +188,7 @@ object AddressExtractor {
     /** S1: 【】括号站名（无守卫，纯填 stationName）。 */
     private fun stepBracketBrand(allText: String, st: LocationState) {
     // S1: 【】 bracket brand for station name
-    // 优先取含站点/快递关键词的括号；跳过快递员姓名+电话的括号（如【刘趁义:13800000000】）
+    // 优先取含站点/快递关键词的括号；跳过快递员姓名+电话的括号（如【刘明义:13800000000】）
     // 注意：不设"取第一个括号"的兜底——否则快递员括号会误当站名，留空交给后面的分支补全
     val bracketMatches = BrandResolver.BRACKET_BRAND.findAll(allText).map { it.groupValues[1].trim() }.toList()
     val goodBracket = bracketMatches.firstOrNull { content ->
@@ -671,7 +671,7 @@ object AddressExtractor {
 
         // 优先级 0（新增，2026-09-16 多码同框地址串台修复）：
         // **行内含本码值**的「到…」句式 —— 地址与码写在同一行，是唯一不依赖窗口边界的硬证据。
-        // 真机/短信典型：凭8-2-3311到建设南路取您的快递；而相邻卡片的「凭1-6-5020到兴兴路北段店」
+        // 真机/短信典型：凭9-4-1526到建设南路取您的快递；而相邻卡片的「凭3-7-4162到兴兴路北段店」
         // 在 ±3 行窗口里排在前面，旧实现按行号升序取第一个「到」→ 地址串台到别的码上。
         for (i in lines.indices) {
             val t = lines[i].text
@@ -979,11 +979,11 @@ object AddressExtractor {
         if (!hasStreet || bareYuanOnly) return false
         // Exclude non-address strings that happen to contain a "号" indicator (e.g. 运单尾号)
         if (listOf("取运单", "运单尾号", "运单", "包裹", "删除").any { t.contains(it) }) return false
-        // Exclude pickup-code prefix noise (e.g. OUCR 把「取件码」拆成 件码 紧跟码值，如 件码067865到…)
+        // Exclude pickup-code prefix noise (e.g. OUCR 把「取件码」拆成 件码 紧跟码值，如 件码041327到…)
         if (listOf("件码", "取件码", "取货码", "提取码", "取餐码", "取单码").any { t.contains(it) }) return false
         // Exclude 运单号/单号 标签（如 OCR 误写的 快谨单号）——不是取件地址
         if (t.endsWith("单号") || listOf("运单号", "订单号", "快运单号", "快递单号").any { t.contains(it) }) return false
-        // Exclude 快递运单号行："品牌+快递后缀+冒号/空格+兴数字串"（如 中通快递:79130792810099）
+        // Exclude 快递运单号行："品牌+快递后缀+冒号/空格+兴数字串"（如 中通快递:79152640318774）
         // 这是快递详情页的运单号行，绝不可能是指件地址；真实地址不会带"快递:9位以上纯数字"。
         if (COURIER_TRACKING_LINE.containsMatchIn(t)) return false
         // Exclude 营销/促销/商品 文案（真机语料回归 2026-09-16）：这类文案常含「号/中/站/店」等地址指示字

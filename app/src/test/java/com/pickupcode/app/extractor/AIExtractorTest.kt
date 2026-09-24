@@ -100,13 +100,13 @@ class AIExtractorTest {
         val content = """
             好的，结果如下：
             ```json
-            [{"code":"1-6-5020","type":"pickup_parcel","source":"圆通","address":"长兴路北段老李超市旁边","station":"菜鸟驿站","cabinet":"2号柜"},
+            [{"code":"3-7-4162","type":"pickup_parcel","source":"圆通","address":"长兴路北段老李超市旁边","station":"菜鸟驿站","cabinet":"2号柜"},
              {"code":"A12","type":"pickup_food","source":"瑞幸","address":"","station":"","cabinet":""}]
             ```
         """.trimIndent()
         val r = AIExtractor.parseResults(content)
         assertEquals(2, r.size)
-        assertEquals("1-6-5020", r[0].code)
+        assertEquals("3-7-4162", r[0].code)
         assertEquals("圆通", r[0].source)
         assertEquals("长兴路北段老李超市旁边", r[0].address)
         assertEquals("菜鸟驿站", r[0].station)

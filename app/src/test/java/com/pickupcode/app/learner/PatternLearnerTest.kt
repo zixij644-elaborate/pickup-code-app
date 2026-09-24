@@ -22,10 +22,10 @@ class PatternLearnerTest {
     private fun tokenToRegex(tok: String) = invokePrivate("tokenToRegex", tok)
 
     @Test
-    @DisplayName("tokenize 把码值折叠成字符类 run（1-6-5020 → d-d-d4）")
+    @DisplayName("tokenize 把码值折叠成字符类 run（3-7-4162 → d-d-d4）")
     fun tokenizeCollapsesRuns() {
-        assertEquals("d-d-d4", tokenize("1-6-5020"))
-        assertEquals("L-d5", tokenize("D-06003"))
+        assertEquals("d-d-d4", tokenize("3-7-4162"))
+        assertEquals("L-d5", tokenize("H-24137"))
     }
 
     @Test
@@ -37,9 +37,9 @@ class PatternLearnerTest {
         assertTrue(re.endsWith("(?![\\dA-Za-z])"), re)
 
         val regex = Regex(re)
-        assertTrue(regex.containsMatchIn("1-6-5020"))
+        assertTrue(regex.containsMatchIn("3-7-4162"))
         // 历史缺陷：\b 边界下码值紧贴中文时漏抓
-        assertTrue(regex.containsMatchIn("取件码1-6-5020到长兴路"), "紧贴中文必须命中: $re")
+        assertTrue(regex.containsMatchIn("取件码3-7-4162到长兴路"), "紧贴中文必须命中: $re")
     }
 
     @Test

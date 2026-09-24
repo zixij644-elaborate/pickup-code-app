@@ -383,7 +383,7 @@ private fun patternLabel(id: String): String = when (id) {
     "THREE_SEGMENT_PARCEL" -> "三段式取件码（1-2-3456）"
     "FOUR_SEGMENT_PARCEL" -> "四段式取件码（A1-2-3-45）"
     "LETTER_TWO_SEGMENT_PARCEL" -> "两段式字母（A-1-234）"
-    "LETTER_DASH_FIVE_PARCEL" -> "字母-数字（D-06003）"
+    "LETTER_DASH_FIVE_PARCEL" -> "字母-数字（H-24137）"
     "LONG_NUMBER_PARCEL" -> "长数字（6-8位）"
     else -> id
 }

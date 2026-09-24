@@ -1,7 +1,8 @@
 # id: parcel-adjacent-chinese-6digit
 # source: screen
-# note: 6 位纯数字紧贴中文（欢猫智柜 749019复制）——ICU 下 \b 失效的历史回归
-L - - - - - 欢猫智柜 749019复制
+# note: 6 位纯数字紧贴中文（欢猫智柜 306284复制）——ICU 下 \b 失效的历史回归
+#   注：本条语料的码值/运单号/电话为同形态合成值（2026-09-24 脱敏）——真实取件凭证不进公开仓库，形态与 OCR 噪声保留，回归效力相同。
+L - - - - - 欢猫智柜 306284复制
 
-E code pickup_parcel 749019
+E code pickup_parcel 306284
 E station 欢猫智柜

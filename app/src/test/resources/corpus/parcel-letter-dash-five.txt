@@ -1,6 +1,7 @@
 # id: parcel-letter-dash-five
 # source: screen
-# note: 字母-横杠-5 位数字 D-06003（兔喜/丰巢常见）
-L - - - - - 取件码:D-06003
+# note: 字母-横杠-5 位数字 H-24137（兔喜/丰巢常见）
+#   注：本条语料的码值/运单号/电话为同形态合成值（2026-09-24 脱敏）——真实取件凭证不进公开仓库，形态与 OCR 噪声保留，回归效力相同。
+L - - - - - 取件码:H-24137
 
-E code pickup_parcel D-06003
+E code pickup_parcel H-24137

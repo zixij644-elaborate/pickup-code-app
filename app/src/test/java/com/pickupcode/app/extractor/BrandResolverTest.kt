@@ -25,7 +25,7 @@ class BrandResolverTest {
     @Test
     @DisplayName("运单号被中文包裹在中间：也要能抓到")
     fun orderNumberSurroundedByChinese() {
-        assertEquals("79130792810099", BrandResolver.findOrderNumber("【中通快递】单号79130792810099已到驿站"))
+        assertEquals("79152640318774", BrandResolver.findOrderNumber("【中通快递】单号79152640318774已到驿站"))
     }
 
     @Test

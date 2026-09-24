@@ -24,7 +24,7 @@ object CodeExtractor {
     enum class CodeType { pickup_food, pickup_parcel, coupon }
 
     // 边界统一用 (?<![\dA-Za-z])/(?![\dA-Za-z]) 而非 \b：Android(ICU) 的 \b 把中文当词字符，
-    // 码值紧贴中文（如 "749019复制"）时 \b 失效漏抓；桌面 JVM 测不出来（ASCII \b），真机必现。    // A8-3-3315: letter prefix + 3 dash-separated segments, e.g. locker codes (A/B/C prefix)
+    // 码值紧贴中文（如 "306284复制"）时 \b 失效漏抓；桌面 JVM 测不出来（ASCII \b），真机必现。    // B6-2-7041: letter prefix + 3 dash-separated segments, e.g. locker codes (A/B/C prefix)
     private val LETTER_THREE_SEG_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z]\\d{1,2})-(\\d{1,2})-(\\d{3,6})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     private val LETTER_DASH_THREE_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z])-(\\d{3,4})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     // 字母+数字（餐饮取餐码）：**不允许内部空格**。2026-09-16 真实语料回归（58 张真机截图）发现：
@@ -35,16 +35,16 @@ object CodeExtractor {
     // 券号（团购券/到店券的数字券码）：OCR 常按字符间隙拆出空格（券号1246 1046 4170 008），
     // 贪婪捕获整段后去空格/间隔点还原完整码；PREFIXED/PING 不再管券号（12 位上限且类型错）。
     private val COUPON_NUMBER = Regex("券号[:：]?\\s*([\\d][\\d\\s·.]{3,28}[\\d])")
-    // 菜鸟/驿站类通知标准句式：凭1-6-5020到...取（件）；容忍 OCR 在码值与方位词间插入空格
+    // 菜鸟/驿站类通知标准句式：凭3-7-4162到...取（件）；容忍 OCR 在码值与方位词间插入空格
     private val PING_CODE = Regex("(?:凭|好评码|提取码)[:：]?\\s*([A-Za-z0-9\\-]{2,12}?)\\s*(?=(?:到|至|去|领|取|在|格|号柜|菜鸟|驿站|快递柜))", RegexOption.IGNORE_CASE)
 
     // 跨行前缀：上一行是取件码/凭条等词 + 下一行开头是码（后接地址/通知等）；去掉行尾$锚点，
-    // 否则"231607 到长兴路..."这类码后跟真实地址的会被漏抓（需保留开头强锚定 + 后不能紧邻数字/破折号）
+    // 否则"412908 到长兴路..."这类码后跟真实地址的会被漏抓（需保留开头强锚定 + 后不能紧邻数字/破折号）
     private val NEXT_LINE_CODE = Regex("^\\s*([A-Za-z0-9\\-]{2,12})\\s*(?![-\\d])")
     private val CODE_KEYWORD_NEAR = Regex("(取[件餐货]码|取餐号|驿站|快递柜|自提柜|取件点)")
     /**
      * 「标签在上一行、码值在下一行」用的**整行标签**（`^..$` 锚定，标签行自身不含码值才算）。
-     * 真机案例（2026-09-16 真实语料）：美团外卖配送页「取餐号」(y=803) 正下方 y=843 是唯一真实码 WJO01，
+     * 真机案例（2026-09-16 真实语料）：美团外卖配送页「取餐号」(y=803) 正下方 y=843 是唯一真实码 QTP07，
      * 但 OCR 行数组里中间插进了地图标签行，"按数组下标的下一行"规则完全取不到 → 见 [nearestWholeLineCodeBelow]。
      */
     private val LABEL_FOR_CODE = Regex("^(取[餐件货单][码号]|取餐号|取单号|提取码|凭条号)$")
@@ -248,14 +248,14 @@ object CodeExtractor {
             CodeType.pickup_parcel, SCORE_FOUR_SEG, strong = true),
         BuiltinRule("LETTER_TWO_SEGMENT_PARCEL", "两段式字母（A-1-234）", LETTER_TWO_SEGMENT_PARCEL,
             CodeType.pickup_parcel, SCORE_LETTER_TWO_SEG, strong = true),
-        BuiltinRule("LETTER_DASH_FIVE_PARCEL", "字母-数字（D-06003）", LETTER_DASH_FIVE_PARCEL,
+        BuiltinRule("LETTER_DASH_FIVE_PARCEL", "字母-数字（H-24137）", LETTER_DASH_FIVE_PARCEL,
             CodeType.pickup_parcel, SCORE_LETTER_DASH_FIVE, strong = true),
-        BuiltinRule("LETTER_THREE_SEG_PARCEL", "字母三段式（A8-3-3315）", LETTER_THREE_SEG_PARCEL,
+        BuiltinRule("LETTER_THREE_SEG_PARCEL", "字母三段式（B6-2-7041）", LETTER_THREE_SEG_PARCEL,
             CodeType.pickup_parcel, SCORE_THREE_SEG, strong = true),
         BuiltinRule("LETTER_DASH_THREE_PARCEL", "字母+三位数字（A-123）", LETTER_DASH_THREE_PARCEL,
             CodeType.pickup_parcel, SCORE_LETTER_DASH_THREE, strong = true),
-        // 兔喜式单段码（5-3858）：低分不 strong——同屏有更强段式码时被 top×0.75 过滤
-        BuiltinRule("DIGIT_DASH_PARCEL", "单段式取件码（5-3858）", DIGIT_DASH_PARCEL,
+        // 兔喜式单段码（7-2914）：低分不 strong——同屏有更强段式码时被 top×0.75 过滤
+        BuiltinRule("DIGIT_DASH_PARCEL", "单段式取件码（7-2914）", DIGIT_DASH_PARCEL,
             CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL),
         BuiltinRule("LONG_NUMBER_PARCEL", "长数字（6-8位）", LONG_NUMBER_PARCEL,
             CodeType.pickup_parcel, SCORE_LONG_NUM_PARCEL, SCORE_CTX_BONUS),
@@ -273,7 +273,7 @@ object CodeExtractor {
             CodeType.pickup_parcel, SCORE_PREFIXED, strong = true, editable = false),
         BuiltinRule("LABEL_FOR_CODE", "标签行正下方取码", LABEL_FOR_CODE,
             CodeType.pickup_parcel, SCORE_PREFIXED, strong = true, editable = false),
-        BuiltinRule("PING_CODE", "凭条号句式（凭 1-6-5020 到…取）", PING_CODE,
+        BuiltinRule("PING_CODE", "凭条号句式（凭 3-7-4162 到…取）", PING_CODE,
             CodeType.pickup_parcel, SCORE_PREFIXED - PING_BASE_PENALTY, strong = true, editable = false),
         BuiltinRule("COUPON_NUMBER", "券号（券号: 长数字）", COUPON_NUMBER,
             CodeType.coupon, SCORE_PREFIXED, strong = true, editable = false)
@@ -380,7 +380,7 @@ object CodeExtractor {
                         SCORE_PREFIXED, sourceFromLine(line, p, lines, allText), strong = true))
                 }
             }
-            // 跨行：OCR 常把「取件码/凭取」拆成两行（如 上一行结尾「取」+ 本行「件码067865」）
+            // 跨行：OCR 常把「取件码/凭取」拆成两行（如 上一行结尾「取」+ 本行「件码041327」）
             if (i > 0) {
                 val prev = lines[i - 1].text.trim()
                 // 仅当本行以裸前缀字+码开头（件/餐/货/单+码）且无空格分隔，才尝试拼接上一行尾字
@@ -420,7 +420,7 @@ object CodeExtractor {
 
         // 标签行 + **竖直正下方**的码（2026-09-16 真实语料回归新增）：
         // OCR 行数组顺序不可靠——地图/浮层标签会插进标签与码值之间，"数组下一行"规则会漏掉真实码。
-        // 真机案例：美团外卖配送页「取餐号」在 y=803，唯一真实码 WJO01 在 y=843，而中间隔了 4 个数组下标。
+        // 真机案例：美团外卖配送页「取餐号」在 y=803，唯一真实码 QTP07 在 y=843，而中间隔了 4 个数组下标。
         for ((i, labelLine) in lines.withIndex()) {
             val labelMatch = labelForCode.find(labelLine.text.trim()) ?: continue
             val token = nearestWholeLineCodeBelow(lines, i) ?: continue
@@ -440,7 +440,7 @@ object CodeExtractor {
                         val minMatchLen: Int = 0, val isLearned: Boolean = false, val strong: Boolean = false,
                         val requireLocalCtx: Boolean = false)
 
-        // 凭条号句式（凭1-6-5020到...取）：菜鸟驿站/快递柜典型通知，优先且绕过 food 上下文干扰
+        // 凭条号句式（凭3-7-4162到...取）：菜鸟驿站/快递柜典型通知，优先且绕过 food 上下文干扰
         for (line in lines) {
             pingCode.findAll(line.text).forEach matchLoop@{ m ->
                 val code = m.groupValues[1].trim('-')
@@ -625,7 +625,7 @@ object CodeExtractor {
         val seen = mutableSetOf<String>()
         val results = mutableListOf<ExtractedCode>()
         // 子串消除（真机日志对照分析新增）：OCR 截断/规则重叠会产生"长码的子串"（如 3-6-403 是 3-6-4035 的子串、
-        // 1-6-5020 的子串 6-5020），只保留最长者，避免短残码入库
+        // 3-7-4162 的子串 7-4162），只保留最长者，避免短残码入库
         val byLen = candidates.sortedByDescending { it.code.length }
         val keptCands = byLen.filter { c -> byLen.none { o -> o !== c && c.code in o.code && o.code.length > c.code.length } }
         // 阈值基准必须是"最高分候选"：keptCands 是按**码长**排序的（为上面子串消除服务），
@@ -761,7 +761,7 @@ object CodeExtractor {
      * - 掩码手机号：`86-135****2468`（号码保护）
      * - 时间/日期尾随冒号：`20:15`、`08-0617:11:21`
      * - 国标号：`GB/T19777`（山西老陈醋标准号）
-     * - 座机区号前缀：`0394-8301307`（6-8 位纯数字且前邻 3-4 位区号）
+     * - 座机区号前缀：`0394-6728150`（6-8 位纯数字且前邻 3-4 位区号）
      */
     private fun hasAdjacentNoise(line: String, match: MatchResult): Boolean {
         val code = match.value

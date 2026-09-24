@@ -9,16 +9,16 @@ object CodeValidator {
     /** 5 个共享解析正则（CodeExtractor 识别用 + 本类的格式分类表用，单一归属）。
      *  边界说明（重要）：不用 \b，改用显式环视 (?<![\dA-Za-z]) / (?![\dA-Za-z])。
      *  桌面 JVM 的 \b 是 ASCII 语义，但 Android libcore 的 java.util.regex 基于 ICU，
-     *  \b 把中文视为词字符——码值紧贴中文时（如 OCR 行 "749019复制"）末尾 \b 失效导致漏抓。
+     *  \b 把中文视为词字符——码值紧贴中文时（如 OCR 行 "306284复制"）末尾 \b 失效导致漏抓。
      *  （PatternLearner.PURE_CANDIDATE 早已用同样写法规避此坑，见其注释。） */
     internal val THREE_SEGMENT_PARCEL = Regex("(?<![\\dA-Za-z])(\\d{1,3})-(\\d{1,2})-(\\d{3,6})(?![\\dA-Za-z])")
     internal val FOUR_SEGMENT_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z]?\\d{1,2})-(\\d{1,2})-(\\d{1,2})-(\\d{2,4})(?![\\dA-Za-z])")
     internal val LETTER_TWO_SEGMENT_PARCEL = Regex("(?<![\\dA-Za-z])([A-Z])-(\\d{1,2})-(\\d{3,4})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     internal val LETTER_DASH_FIVE_PARCEL = Regex("(?<![\\dA-Za-z])([A-Za-z])-?(\\d{5,6})(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
     internal val LONG_NUMBER_PARCEL = Regex("(?<![\\dA-Za-z])(\\d{6,8})(?![\\dA-Za-z])")
-    /** 兔喜生活/妈妈驿站式单段码：柜架组号-码（如 5-3858、12-3456）。
+    /** 兔喜生活/妈妈驿站式单段码：柜架组号-码（如 7-2914、12-3456）。
      *  注意：必须与 VALID_CODE_FORMATS 全串白名单一致；评分低（60），
-     *  同屏存在更强段式码时会被 top×0.75 过滤，避免把 "1-6-5020" 的子串 "6-5020" 误抓成码。 */
+     *  同屏存在更强段式码时会被 top×0.75 过滤，避免把 "3-7-4162" 的子串 "7-4162" 误抓成码。 */
     internal val DIGIT_DASH_PARCEL = Regex("(?<![\\dA-Za-z])(\\d{1,2})-(\\d{3,5})(?![\\dA-Za-z])")
 
     private const val PATTERN_PREFIXED = "PREFIXED_CODE"
@@ -127,7 +127,7 @@ object CodeValidator {
         Regex("[A-Za-z]-?\\d{5,6}"),                                  // LETTER_DASH_FIVE
         Regex("[A-Za-z]\\d{1,2}-\\d{1,2}-\\d{3,6}", RegexOption.IGNORE_CASE), // LETTER_THREE_SEG
         Regex("[A-Za-z]-\\d{3,4}", RegexOption.IGNORE_CASE),          // LETTER_DASH_THREE
-        Regex("\\d{1,2}-\\d{3,5}"),                                     // DIGIT_DASH_PARCEL 兔喜式（5-3858）
+        Regex("\\d{1,2}-\\d{3,5}"),                                     // DIGIT_DASH_PARCEL 兔喜式（7-2914）
         Regex("\\d{6,8}"),                                            // LONG_NUMBER
         Regex("[A-Z]-?\\d{2,4}", RegexOption.IGNORE_CASE),  // LETTER_NUMBER_FOOD（内部不允许空格：见 CodeExtractor 同规则注释）
         // PURE_NUMBER_FOOD：手动/AI 校验无上下文，收紧为 4-5 位，避免 2-3 位裸数字(42/123)被当合法码

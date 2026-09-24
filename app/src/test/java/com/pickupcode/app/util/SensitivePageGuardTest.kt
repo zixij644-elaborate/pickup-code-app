@@ -23,7 +23,7 @@ class SensitivePageGuardTest {
     @Test
     @DisplayName("普通取件码/取餐码文本不得被误拦（不能把主功能砍掉）")
     fun doesNotBlockNormalPickupText() {
-        assertFalse(SensitivePageGuard.isIdentityCodePage("【菜鸟驿站】您的取件码 1-6-5020 已到"))
+        assertFalse(SensitivePageGuard.isIdentityCodePage("【菜鸟驿站】您的取件码 3-7-4162 已到"))
         assertFalse(SensitivePageGuard.isIdentityCodePage("您的取餐码 A-3-315 请取餐"))
         assertFalse(SensitivePageGuard.isIdentityCodePage("包裹已放入快递柜，凭取件码 8-1-2233 取件"))
         assertFalse(SensitivePageGuard.isIdentityCodePage("验证码 618008，请勿告知他人"))

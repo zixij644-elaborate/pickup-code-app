@@ -178,12 +178,12 @@ class RuleManagementTest {
         val builtinIds = CodeExtractor.builtinRuleInfos(null).map { it.id }.toSet()
         // classifyFormat 能产出的 id 必须都能在内置表里找到
         listOf(
-            "1-6-5020" to "THREE_SEGMENT_PARCEL",
+            "3-7-4162" to "THREE_SEGMENT_PARCEL",
             "A1-2-3-45" to "FOUR_SEGMENT_PARCEL",
             "A-1-234" to "LETTER_TWO_SEGMENT_PARCEL",
-            "D-06003" to "LETTER_DASH_FIVE_PARCEL",
+            "H-24137" to "LETTER_DASH_FIVE_PARCEL",
             "123456" to "LONG_NUMBER_PARCEL",
-            "5-3858" to "DIGIT_DASH_PARCEL"
+            "7-2914" to "DIGIT_DASH_PARCEL"
         ).forEach { (code, expectedId) ->
             val actual = CodeValidator.classifyFormat(code)
             assertEquals(expectedId, actual, "「$code」的格式 id 变了")
@@ -217,7 +217,7 @@ class RuleManagementTest {
     fun confirmedCodeCoveredByBuiltinIsSkipped() {
         assertSame(
             PatternLearner.VerifiedDecision.Skip,
-            PatternLearner.decideVerified("1-6-5020", emptySet(), builtinCovers = true)
+            PatternLearner.decideVerified("3-7-4162", emptySet(), builtinCovers = true)
         )
         assertSame(
             PatternLearner.VerifiedDecision.Skip,
@@ -252,8 +252,8 @@ class RuleManagementTest {
     @Test
     @DisplayName("builtinCovers：内置能抓的为 true，抓不到的为 false")
     fun builtinCoversDetectsCoveredShapes() {
-        assertTrue(CodeExtractor.builtinCovers("1-6-5020"), "三段式应被内置覆盖")
-        assertTrue(CodeExtractor.builtinCovers("5-3858"), "单段式应被内置覆盖")
+        assertTrue(CodeExtractor.builtinCovers("3-7-4162"), "三段式应被内置覆盖")
+        assertTrue(CodeExtractor.builtinCovers("7-2914"), "单段式应被内置覆盖")
         assertFalse(CodeExtractor.builtinCovers("ZQ123456"), "字母+6位数字内置抓不到")
         assertFalse(CodeExtractor.builtinCovers(""), "空串不算覆盖")
     }

@@ -1,7 +1,8 @@
 # id: noise-masked-phone
 # source: screen
 # note: 掩码手机号 86-135****2468 不得被当成取件码（hasAdjacentNoise 的 * 规则）
+#   注：本条语料的码值/运单号/电话为同形态合成值（2026-09-24 脱敏）——真实取件凭证不进公开仓库，形态与 OCR 噪声保留，回归效力相同。
 L - - - - - 号码保护中 86-135****2468
-L - - - - - 取件码 1-6-5020
+L - - - - - 取件码 3-7-4162
 
-E code pickup_parcel 1-6-5020
+E code pickup_parcel 3-7-4162

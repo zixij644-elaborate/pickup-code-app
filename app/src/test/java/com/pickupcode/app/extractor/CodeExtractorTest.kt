@@ -14,13 +14,13 @@ class CodeExtractorTest {
     @DisplayName("全角数字/减号转半角")
     fun normalize_fullwidth() {
         assertEquals("123-1", CodeExtractor.normalizeText("１２３－１"))
-        assertEquals("1-6-5020", CodeExtractor.normalizeText("１－６－５０２０"))
+        assertEquals("3-7-4162", CodeExtractor.normalizeText("３－７－４１６２"))
     }
 
     @Test
     @DisplayName("全角括号/逗号归一 + 空白压缩")
     fun normalize_punct() {
-        assertEquals("(1-6-5020)", CodeExtractor.normalizeText("（１－６－５０２０）"))
+        assertEquals("(3-7-4162)", CodeExtractor.normalizeText("（３－７－４１６２）"))
         assertEquals("a b c", CodeExtractor.normalizeText("a\tb\nc"))
     }
 
@@ -43,7 +43,7 @@ class CodeExtractorTest {
     @Test
     @DisplayName("金融词 + 快递词 → 放行")
     fun finance_with_express() {
-        assertFalse(CodeExtractor.isFinancialNoise("您的快递已到，取件码 1-6-5020"))
+        assertFalse(CodeExtractor.isFinancialNoise("您的快递已到，取件码 3-7-4162"))
         assertFalse(CodeExtractor.isFinancialNoise("包裹驿站取件通知，微信支付已扣"))
     }
 
@@ -57,9 +57,9 @@ class CodeExtractorTest {
     @Test
     @DisplayName("提取前缀取件码")
     fun extract_parcel() {
-        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的取件码 1-6-5020 已到")))
+        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的取件码 3-7-4162 已到")))
         assertTrue(r.isNotEmpty(), "应提取出取件码")
-        assertEquals("1-6-5020", r.first().code)
+        assertEquals("3-7-4162", r.first().code)
         assertEquals(CodeExtractor.CodeType.pickup_parcel, r.first().type)
     }
 
@@ -89,21 +89,21 @@ class CodeExtractorTest {
     }
 
     @Test
-    @DisplayName("提取兔喜式单段码（取件码为5-3858）")
+    @DisplayName("提取兔喜式单段码（取件码为7-2914）")
     fun extract_tuxiDigitDash() {
         val r = CodeExtractor.extract(listOf(
-            line("【兔喜生活】您有包裹已到达长兴路北段店，取件码为5-3858，地址:长兴路北段老李超市旁边")
+            line("【兔喜生活】您有包裹已到达长兴路北段店，取件码为7-2914，地址:长兴路北段老李超市旁边")
         ))
         assertTrue(r.isNotEmpty(), "应提取出取件码")
-        assertEquals("5-3858", r.first().code)
+        assertEquals("7-2914", r.first().code)
         assertEquals(CodeExtractor.CodeType.pickup_parcel, r.first().type)
     }
 
     @Test
-    @DisplayName("三段式码的子串不会被兔喜规则误抓（1-6-5020 不应同时产出 6-5020）")
+    @DisplayName("三段式码的子串不会被兔喜规则误抓（3-7-4162 不应同时产出 7-4162）")
     fun extract_noSubstringDup() {
-        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的取件码 1-6-5020 已到")))
-        assertEquals(listOf("1-6-5020"), r.map { it.code })
+        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的取件码 3-7-4162 已到")))
+        assertEquals(listOf("3-7-4162"), r.map { it.code })
     }
 
     @Test
@@ -117,29 +117,29 @@ class CodeExtractorTest {
     // 桌面 JVM 的 \b 是 ASCII 语义，此 bug 在单测环境复现不出（设备必现），
     // 这些用例锁定「码值紧贴中文仍须提取」的行为要求，防止边界写法被改回 \b。
     @Test
-    @DisplayName("6位纯数字码紧贴中文（欢猫智柜 749019复制）应被提取")
+    @DisplayName("6位纯数字码紧贴中文（欢猫智柜 306284复制）应被提取")
     fun extract_six_digit_adjacent_chinese() {
         val r = CodeExtractor.extract(listOf(
             line("韵达快递435316307300011 取件码"),
             line("长兴路与长青街西长青社区卫生所对面3号柜欢猫智柜"),
-            line("749019复制 您的快件己暂存至新阳市长兴路3号柜")
+            line("306284复制 您的快件己暂存至新阳市长兴路3号柜")
         ))
-        assertTrue(r.any { it.code == "749019" && it.type == CodeExtractor.CodeType.pickup_parcel },
-            "应提取出 749019(pickup_parcel)，实际: ${r.map { "${it.code}(${it.type})" }}")
+        assertTrue(r.any { it.code == "306284" && it.type == CodeExtractor.CodeType.pickup_parcel },
+            "应提取出 306284(pickup_parcel)，实际: ${r.map { "${it.code}(${it.type})" }}")
     }
 
     @Test
-    @DisplayName("字母段式码紧贴中文（D-06003取件）应被提取")
+    @DisplayName("字母段式码紧贴中文（H-24137取件）应被提取")
     fun extract_letter_dash_adjacent_chinese() {
-        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的快件在快递柜，凭D-06003取件")))
-        assertTrue(r.any { it.code == "D-06003" }, "应提取出 D-06003，实际: ${r.map { it.code }}")
+        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的快件在快递柜，凭H-24137取件")))
+        assertTrue(r.any { it.code == "H-24137" }, "应提取出 H-24137，实际: ${r.map { it.code }}")
     }
 
     @Test
-    @DisplayName("三段式码紧贴中文（1-6-5020到）应被提取")
+    @DisplayName("三段式码紧贴中文（3-7-4162到）应被提取")
     fun extract_three_seg_adjacent_chinese() {
-        val r = CodeExtractor.extract(listOf(line("凭1-6-5020到1号柜取件")))
-        assertTrue(r.any { it.code == "1-6-5020" }, "应提取出 1-6-5020，实际: ${r.map { it.code }}")
+        val r = CodeExtractor.extract(listOf(line("凭3-7-4162到1号柜取件")))
+        assertTrue(r.any { it.code == "3-7-4162" }, "应提取出 3-7-4162，实际: ${r.map { it.code }}")
     }
 
     @Test
@@ -167,20 +167,20 @@ class CodeExtractorTest {
     }
 
     @Test
-    @DisplayName("座机区号前缀 0394-8301307 不当作取件码")
+    @DisplayName("座机区号前缀 0394-6728150 不当作取件码")
     fun extract_rejects_area_code_phone() {
-        val r = CodeExtractor.extract(listOf(line("揽投部[电话:0394-8301307,投诉电话]")))
-        assertTrue(r.none { it.code == "8301307" }, "座机号码 8301307 不应被提取，实际: ${r.map { it.code }}")
+        val r = CodeExtractor.extract(listOf(line("揽投部[电话:0394-6728150,投诉电话]")))
+        assertTrue(r.none { it.code == "6728150" }, "座机号码 6728150 不应被提取，实际: ${r.map { it.code }}")
     }
 
     @Test
-    @DisplayName("真实中通行（网点电话:0394-8301307）即使同屏有取件码也不混入")
+    @DisplayName("真实中通行（网点电话:0394-6728150）即使同屏有取件码也不混入")
     fun extract_rejects_real_area_code_line() {
         val r = CodeExtractor.extract(listOf(
-            line("包裏等间题诗联系快递员.网点电话:0394-8301307,投"),
+            line("包裏等间题诗联系快递员.网点电话:0394-6728150,投"),
             line("取件码:3-1-1099 复制")
         ))
-        assertTrue(r.none { it.code == "8301307" }, "8301307 不应出现，实际: ${r.map { it.code }}")
+        assertTrue(r.none { it.code == "6728150" }, "6728150 不应出现，实际: ${r.map { it.code }}")
         assertTrue(r.any { it.code == "3-1-1099" }, "真实码 3-1-1099 应保留，实际: ${r.map { it.code }}")
     }
 
@@ -188,7 +188,7 @@ class CodeExtractorTest {
     @DisplayName("掩码手机号 86-135****2468 不当作取件码")
     fun extract_rejects_masked_phone() {
         val r = CodeExtractor.extract(listOf(line("李明 86-135****2468 号码保护中")))
-        assertTrue(r.none { it.code == "86-182" }, "掩码手机号片段 86-182 不应被提取，实际: ${r.map { it.code }}")
+        assertTrue(r.none { it.code == "86-135" }, "掩码手机号片段 86-135 不应被提取，实际: ${r.map { it.code }}")
     }
 
     @Test
@@ -312,7 +312,7 @@ class CodeExtractorTest {
     @Test
     @DisplayName("带快递信号的银行/支付混合文案仍放行（闸门不能修成误杀）")
     fun finance_withRealExpressSignalPasses() {
-        assertFalse(CodeExtractor.isFinancialNoise("【菜鸟驿站】您的取件码 1-6-5020，微信支付已扣款"))
+        assertFalse(CodeExtractor.isFinancialNoise("【菜鸟驿站】您的取件码 3-7-4162，微信支付已扣款"))
         assertFalse(CodeExtractor.isFinancialNoise("包裹已到快递柜，支付宝到账提醒已关闭"))
     }
 
@@ -351,9 +351,9 @@ class CodeExtractorTest {
         OCREngine.TextLine(text, OCREngine.LineBox(left, top, left + w, top + h), 0.7f)
 
     @Test
-    @DisplayName("真实语料·美团外卖地图页：不许把高速编号 S26 当取餐码，要认出标签正下方的 WJO01")
+    @DisplayName("真实语料·美团外卖地图页：不许把高速编号 S26 当取餐码，要认出标签正下方的 QTP07")
     fun real_meituanMap_codeBelowLabel() {
-        // 坐标为真机 OCR 原值（1260×2800）。「取餐号」在 y=803，真实码 WJO01 在 y=843（大字号 44px），
+        // 坐标为真机 OCR 原值（1260×2800）。「取餐号」在 y=803，真实码 QTP07 在 y=843（大字号 44px），
         // 而地图元素 s26（沪常高速）在 y=406 —— 旧实现因"全屏出现取餐"就把 s26 当取餐码。
         val r = CodeExtractor.extract(
             listOf(
@@ -363,15 +363,15 @@ class CodeExtractorTest {
                 boxed("上海美的全", 100, 720, 100, 22),
                 boxed("球创新园区」", 100, 740, 112, 26),
                 boxed("取餐号", 282, 803, 63, 21),
-                boxed("WJO01", 221, 843, 184, 44),
+                boxed("QTP07", 221, 843, 184, 44),
                 boxed("餐厅己接单,预计 18:33 送达", 132, 926, 358, 28)
             ),
             screenHeight = 2800
         )
         val codes = r.map { it.code }
         assertTrue(codes.none { it.equals("s26", ignoreCase = true) }, "高速编号 s26 不是取餐码: $codes")
-        assertTrue(codes.contains("WJO01"), "标签正下方的真实取餐号必须识别出来: $codes")
-        assertEquals(CodeExtractor.CodeType.pickup_food, r.first { it.code == "WJO01" }.type)
+        assertTrue(codes.contains("QTP07"), "标签正下方的真实取餐号必须识别出来: $codes")
+        assertEquals(CodeExtractor.CodeType.pickup_food, r.first { it.code == "QTP07" }.type)
     }
 
     @Test
