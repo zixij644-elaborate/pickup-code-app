@@ -16,8 +16,9 @@
 ## 功能
 
 ### 核心识别
-- **六种触发方式**：控制面板磁贴、无障碍自动扫描、分享菜单、短信自动识别、划词识别、手动录入
+- **七种触发方式**：控制面板磁贴、双音量键快捷方式、无障碍自动扫描、分享菜单、短信自动识别、划词识别、手动录入
 - **智能 OCR**：ML Kit 中英文混合识别，自动归一化 Unicode 横杠变体
+- **OCR 纠错表**：识别前先按表纠正常见误读（如「免喜」→「兔喜」），错字不影响成码
 - **多格式覆盖**：三段式 (1-2-3456)、四段式 (A1-2-3-45)、字母前缀三段式 (A1-2-3456)、字母-数字 (D-12345)、长数字、带前缀的取件码等
 - **上下文感知**：区分快递/餐饮场景，自动过滤干扰数字
 - **AI 增强**：可选接入任意 OpenAI 兼容 API（默认 GPT-4o-mini，可改），与正则并行识别，结果去重合并
@@ -57,6 +58,13 @@
 - **截图治理**：删记录时先查引用计数，同一张图被多条记录共用（一次分享识别出多个码）时只在最后一条引用消失后才回收；启动时清理孤儿截图与超过 30 天的截图，截图与分享图片两个目录合计控制在 50 MB 以内
 - **回收站清理**：过期记录连同其截图一起删除（截图若仍被其它记录引用则保留）
 
+### 到期提醒
+- **文本时限优先**：「请于 / 截止 / 有效期至 / 最晚 / 保管至 / 取件有效期」后面写的日期直接解析成到期时间，支持 `2026-08-15`、`8月15日`、`8/15` 等写法；「今日/今天」按当天 20:00 算（驿站营业尾段，不是午夜）
+- **快递兜底 72 小时**：短信/截图里没写时限的快递码，按国内驿站常规 3 天存放期排提醒
+- **取餐码不打扰**：餐饮类是当场取，不做到期提醒
+- **改码/取件/删除自动取消**：改码值按新码重排提醒，标记已取或删除时立即撤销，进程重启后也能按码清理
+- **开关**：设置 → 到期提醒 → 「快递取件码到期提醒」，默认开启
+
 ### 隐私
 - **纯本地**：取件记录、预存地址等数据只存在本机，不上传云端
 - **加密存储**：API Key、常用取件地址、自动学习的常用驿站、未匹配样本与已验证地址样本，均经 AndroidKeyStore AES-GCM 加密后落盘；升级时自动把旧的明文数据原地加密
@@ -66,6 +74,8 @@
 ### 自学习
 - **自动模式发现**：从未识别的 OCR 文本中聚类分析，自动生成新正则并应用
 - **用户反馈闭环**：详情页确认/标记错误，记录每个模式的准确率
+- **确认即成规**：详情页点「码值正确」或亲手改写码值，1 条样本就能生成规则（规则页标「已确认」），不必等同形状出现 3 次；内置正则本来就能抓到的形状不会重复学习，避免堆垃圾规则
+- **识别规则管理**：设置 → 识别规则，15 条内置正则（10 条评分类 + 5 条特殊模式）逐条停用、改写、单条还原，也能自己加规则；改坏了可「一键还原默认」，而一键还原不碰预存地址、常用取件点与识别统计；写的正则语法错会自动回退出厂版本，一条自定义规则不会拖垮整个识别
 - **统计面板**：总览命中率、模式分布、已学习规则、候选建议
 - **识别成绩单**：一键生成统计卡片图片，分享给好友
 
@@ -102,7 +112,9 @@
 | OCR | ML Kit Text Recognition (Chinese) |
 | 截屏 | 无障碍服务 takeScreenshot |
 | 外部接收 | Intent Filter (SEND / PROCESS_TEXT) |
-| 触发 | Quick Settings Tile + 无障碍自动扫描 |
+| 触发 | Quick Settings Tile + 无障碍自动扫描 + 系统无障碍快捷方式（双音量键） |
+| 短信 | SMS BroadcastReceiver（可选权限） |
+| 到期提醒 | AlarmManager + 文本时限解析（快递 72h 兜底，取餐码跳过） |
 | 存储 | Room (SQLite) |
 | 设置 | DataStore Preferences |
 | 加密 | AndroidKeyStore AES-GCM（API Key、常用取件地址、学习样本） |
@@ -110,7 +122,8 @@
 | 地图 | Android Geocoder + 高德 API（可选） |
 | 快递验证 | 快递100 API（可选） |
 | AI | 可选接入任意 OpenAI 兼容 API（默认 GPT-4o-mini，支持修改 API 地址与密钥） |
-| 自学习 | 本地聚类分析 + 自动正则生成 |
+| 自学习 | 本地聚类分析 + 自动正则生成 + 用户确认即成规 |
+| 规则管理 | 内置正则表（稳定 id）+ 用户覆盖（停用/改写/一键还原） |
 
 ## 项目结构
 
@@ -123,21 +136,28 @@ app/src/main/java/com/pickupcode/app/
 │   ├── CodeExtractor.kt        # 取件/取餐码 正则+评分+地址策略管线
 │   ├── AddressExtractor.kt     # 地址识别：预存地址 → 逐码窗口 → 全屏多级策略
 │   ├── SavedAddressMatcher.kt  # 预存地址匹配（纯函数，可单测）
+│   ├── ExpiryExtractor.kt      # 到期时间提取：文本时限 → 快递 72h 兜底 → 取餐码跳过
+│   ├── OcrCorrections.kt       # OCR 常见误读纠错表（免喜→兔喜 等）
+│   ├── BrandResolver.kt        # 运单号前缀/品牌词 → 来源品牌
 │   ├── AIExtractor.kt          # OpenAI 兼容 AI 提取
+│   ├── RecognitionDebugStore.kt # 识别调试快照（仅 DEBUG 构建可见）
 │   └── CouponDetector.kt       # 券码(二维码)检测+解码
 ├── ocr/OCREngine.kt       # ML Kit 文本识别
 ├── learner/               # 自学习
-│   ├── PatternLearner.kt       # 自动生成正则/统计
+│   ├── PatternLearner.kt       # 自动生成正则/统计/用户确认即成规
+│   ├── DailyStats.kt           # 每日识别统计
 │   ├── CommonStationStore.kt   # 自动学习的常用站点（仅作"从历史导入"候选）
 │   └── SavedAddressStore.kt    # 用户预存地址（加密存储）
 ├── util/                  # IdentityCodeLauncher(身份码跳转)、ScreenshotStore(截图治理)、SensitivePageGuard(身份码页面拒采)
 ├── geocoder/GeocoderVerifier.kt   # 地址地理编码验证
 ├── kuaidi100/Kuaidi100Verifier.kt # 快递100 运单反查
-├── notification/          # 取餐/取件/券码通知 + 已取/忽略广播
+├── notification/          # 取餐/取件/券码通知 + 已取/忽略广播 + 到期提醒(RemindReceiver)
 ├── preferences/           # 设置(DataStore) + SecretCipher(加解密)
-├── service/               # 无障碍服务(截屏+识别)、快捷磁贴、CodeCompletion(归档/撤销/改码统一入口)
+├── service/               # 无障碍服务(截屏+识别)、快捷磁贴、双音量键快捷方式、
+│                          # RecognitionPipeline(单一识别入口)、PostVerifier(地址/快递复核)、
+│                          # CodeCompletion(归档/撤销/改码统一入口)
 ├── share/ShareReceiver.kt # 外部分享/拖放
-└── ui/                    # Compose UI：theme/components/screens
+└── ui/                    # Compose UI：theme/components/screens（含 RulesScreen 规则管理、StatsScreen 统计、RecognitionDebugDialog）
 ```
 
 **识别流程**：`截图/分享 → OCR(文字) + 券码检测(二维码) + 正则/AI(取餐/取件码) → 合并去重(券码与食/件码互斥) → 地址识别(预存地址优先) → 存库 + 通知 → 地址验证/快递100反查`
