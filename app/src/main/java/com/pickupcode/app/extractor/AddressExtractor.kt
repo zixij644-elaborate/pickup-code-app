@@ -394,8 +394,10 @@ object AddressExtractor {
     // S5: "已放至/已存放至/已暂存至/已到" pattern
     if (st.fullAddress.isEmpty()) {
         ADDR_PLACED.find(allText)?.let { m ->
-            val a = m.groupValues[1].replace(PLACED_TRAIL_CUT, "").trim()
-            if (isAddressLike(a)) { st.fullAddress = stripBrackets(a).take(MAX_ADDRESS_LEN); st.addrFrom = "S5-placed" }
+            val raw = m.groupValues[1].replace(PLACED_TRAIL_CUT, "").trim()
+            if (isAddressLike(raw) && !m.value.contains("预计")) {
+                st.fullAddress = stripBrackets(raw).take(MAX_ADDRESS_LEN); st.addrFrom = "S5-placed"
+            }
         }
     }
     }
@@ -796,27 +798,40 @@ object AddressExtractor {
     /**
      * 版式 A（驿站分组「一头挂多卡」）向上查找所属分组头行。
      * 仅当当前码上方只经过兄弟子卡（取件码/运单号/查看订单详情），未经过电商交易按钮或独立通知时间头时，
-     * 才继承上方最近的「导航/电话」站点分组头及紧随其后的详细地址行。
+     * 才继承上方最近的站点分组头（带导航/电话按钮，或直接出现在子卡上方的地址/站点行，兼容 OCR 把「导航」误读为「早航」）。
      */
     private fun findGroupHeaderLines(
         orderedLines: List<OCREngine.TextLine>,
         codeIdx: Int
     ): List<OCREngine.TextLine> {
         val medH = medianLineHeight(orderedLines)
+        var seenSubcardElement = false
         for (i in codeIdx - 1 downTo 0) {
             val t = orderedLines[i].text.trim()
             if (ORDER_UPPER_BARRIER.any { t.contains(it) }) return emptyList()
             if (isNotifTimeHeader(t) || t in setOf("删除", "已读")) return emptyList()
+            if (SIBLING_CODE_LINE.containsMatchIn(t) || COURIER_TRACKING_LINE.containsMatchIn(t) ||
+                CARD_FOOTER_WORDS.any { t.contains(it) }) {
+                seenSubcardElement = true
+                continue
+            }
             val hasNavOrPhone = orderedLines.indices.any { j ->
                 j != i && isSameRowBand(orderedLines[i], orderedLines[j], medH) &&
-                    orderedLines[j].text.trim().let { it == "导航" || it == "电话" }
+                    orderedLines[j].text.trim().let { it == "导航" || it == "早航" || it == "电话" }
             }
-            if (hasNavOrPhone || t.endsWith("导航") || t.endsWith("电话")) {
+            val isGroupAddrLine = seenSubcardElement && (isAddressLike(t) || STATION_TYPE_MAP.keys.any { t.contains(it) })
+            if (hasNavOrPhone || t.endsWith("导航") || t.endsWith("电话") || isGroupAddrLine) {
                 val out = mutableListOf<OCREngine.TextLine>()
-                // 收进同横带标题 + 下方紧邻 1~2 行地址（直到第一张子卡或分隔线）
-                for (j in maxOf(0, i - 1)..minOf(orderedLines.lastIndex, i + 3)) {
+                val lo = maxOf(0, i - 2)
+                val hi = minOf(orderedLines.lastIndex, i + 3)
+                for (j in lo..hi) {
                     val lj = orderedLines[j]
                     val tj = lj.text.trim()
+                    if (j < i && (CARD_FOOTER_WORDS.any { tj.contains(it) } ||
+                            SIBLING_CODE_LINE.containsMatchIn(tj) || COURIER_TRACKING_LINE.containsMatchIn(tj))) {
+                        out.clear()
+                        continue
+                    }
                     if (j > i && !isSameRowBand(orderedLines[i], lj, medH)) {
                         if (SIBLING_CODE_LINE.containsMatchIn(tj) || COURIER_TRACKING_LINE.containsMatchIn(tj)) break
                         if (CARD_FOOTER_WORDS.any { tj.contains(it) }) break
@@ -1283,8 +1298,8 @@ object AddressExtractor {
         // （如「退货包运费保障中」「家用大号桌面键盘书桌写字垫」「承诺达退货包运费保障中」），
         // 但绝不可能是指件地址 —— 宁可该码地址为空（走兜底/留空），也不要把垃圾写进记录。
         if (ADDR_MARKETING_NOISE.any { t.contains(it) }) return false
-        // Exclude 商品促销等式/网店名（如 动态贴合+慢回弹=零压记忆棉床垫、蒋小俊的铺子 >、我的宝儿文具店 >）
-        if (t.contains("=") || listOf("铺子", "文具店", "官方店", "企业店", "小店").any { t.contains(it) }) return false
+        // Exclude 商品促销等式/网店名（如 动态贴合+慢回弹=零压记忆棉床垫、蒋小俊的铺子 >、我的宝儿文具店 >、44CM大号海绵拖）
+        if (t.contains("=") || listOf("铺子", "文具店", "官方店", "企业店", "小店", "大号", "搜索", "搜素").any { t.contains(it) }) return false
         if (t.endsWith(">") && !ADDR_LANDMARK.containsMatchIn(t) && !t.contains("快递") && !t.contains("代收")) return false
         // Exclude 价格串（¥10.8 / 9.9元 / 22.1）
         if (PRICE_LIKE.containsMatchIn(t)) return false

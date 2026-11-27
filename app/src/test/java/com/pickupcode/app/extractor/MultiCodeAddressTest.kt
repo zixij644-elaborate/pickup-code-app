@@ -216,4 +216,30 @@ class MultiCodeAddressTest {
         assertEquals("科技学院一餐厅东侧", AddressExtractor.extractAddressForCode(lines, "17-8-5807", codes))
         assertEquals("科技学院一餐厅东侧", AddressExtractor.extractAddressForCode(lines, "18-4-5424", codes))
     }
+
+    @Test
+    @DisplayName("真机回归：OCR把「导航」误读成「早航」时，组2第2个码 3-2-8519 仍继承兔喜地址")
+    fun patternA_ocrMisreadNavAsZaoHang_stillSeparatesGroup2() {
+        val lines = listOf(
+            line("韩梅诊所对面菜鸟", 185, 45, 85, 16),
+            line("导航", 190, 255, 19, 10),
+            line("韩梅诊所对面菜鸟", 205, 44, 76, 11),
+            line("取件码1-3-4004", 693, 10, 157, 13),
+            line("申通快递:777404279027161", 709, 77, 120, 11),
+            line("立看订单详情>", 737, 8, 130, 14),
+            line("免喜快递超市代收点", 775, 10, 100, 11),
+            line("早航", 776, 256, 18, 8),
+            line("育新路育新路 育新路北段爱玛电动车旁边", 792, 10, 177, 9),
+            line("取件码3-4-4352", 818, 76, 90, 15),
+            line("中通快递: 79100326535714", 838, 77, 119, 9),
+            line("查看订单详情>", 869, 77, 63, 9),
+            line("|取件码3-2-8519", 891, 77, 87, 18),
+            line("At中通快递: 79100137525564", 911, 4, 194, 15),
+            line("查看订单详情>", 945, 81, 60, 9)
+        )
+        val codes = listOf("1-3-4004", "3-4-4352", "3-2-8519")
+        assertEquals("韩梅诊所对面菜鸟", AddressExtractor.extractAddressForCode(lines, "1-3-4004", codes))
+        assertTrue(AddressExtractor.extractAddressForCode(lines, "3-4-4352", codes).contains("育新路北段爱玛电动车旁边"))
+        assertTrue(AddressExtractor.extractAddressForCode(lines, "3-2-8519", codes).contains("育新路北段爱玛电动车旁边"))
+    }
 }

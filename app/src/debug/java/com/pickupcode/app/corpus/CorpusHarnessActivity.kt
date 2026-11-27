@@ -171,8 +171,9 @@ class CorpusHarnessActivity : Activity() {
                         .joinToString("\t")
                 ).append('\n')
             }
+            val allCodes = results.map { it.code }
             for (r in results) {
-                val win = AddressExtractor.extractAddressForCode(lines, r.code)
+                val win = AddressExtractor.extractAddressForCode(lines, r.code, allCodes)
                 val eff = if (savedMatch != null &&
                     (!multiCode || AddressExtractor.isLineInCodeWindow(lines, r.code, savedMatch.lineIndex))
                 ) {
