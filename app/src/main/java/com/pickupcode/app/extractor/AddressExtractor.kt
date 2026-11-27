@@ -632,6 +632,14 @@ object AddressExtractor {
     private val ORDER_UPPER_BARRIER = listOf("确认收货", "申请退款", "申请售后", "延长收货", "实付", "实付款", "先用后付")
     /** 通知栏时间头（如 昨天17:10 / 52分钟前 / 10:56 / 8月17日）。 */
     private val NOTIF_TIME_HEADER = Regex("(?:昨天|今天|前天)?\\s*\\d{1,2}[:：]\\d{2}|\\d{1,2}分钟前|\\d{1,2}小时前|\\d{1,2}月\\d{1,2}日")
+    private val DELIVERY_STATUS_WORDS = listOf("送达", "未取", "已超", "预计", "签收", "派送", "已到")
+
+    /** 仅独立短时间戳（非包裹卡内的「今天15:07已按预计时间送达」物流状态行）才算通知栏时间头。 */
+    private fun isNotifTimeHeader(text: String): Boolean {
+        val t = text.trim()
+        if (t.length > 20 || DELIVERY_STATUS_WORDS.any { t.contains(it) }) return false
+        return NOTIF_TIME_HEADER.containsMatchIn(t)
+    }
     /** 其他取件码行特征（未传入 allCodes 时用于自动识别兄弟码锚点）。 */
     private val SIBLING_CODE_LINE = Regex(
         "(?:取[餐件货单]码|取餐号|取单号|提取码|凭\\s*[A-Za-z0-9\\-]{2,12}|出示[^0-9]{0,8}(?:运单|快递单|快件单)?号?\\s*后)"
@@ -681,7 +689,7 @@ object AddressExtractor {
         val cur = orderedLines[idx]
         val t = cur.text.trim()
         if (t.startsWith("【") && !t.contains("码")) return true
-        if (NOTIF_TIME_HEADER.containsMatchIn(t)) return true
+        if (isNotifTimeHeader(t)) return true
         // 同横带右侧有「导航」或「电话」按钮（拼多多分组头 / 取快递卡片头）
         val hasSideButton = orderedLines.indices.any { j ->
             j != idx && isSameRowBand(cur, orderedLines[j], medH) &&
@@ -798,7 +806,7 @@ object AddressExtractor {
         for (i in codeIdx - 1 downTo 0) {
             val t = orderedLines[i].text.trim()
             if (ORDER_UPPER_BARRIER.any { t.contains(it) }) return emptyList()
-            if (NOTIF_TIME_HEADER.containsMatchIn(t) || t in setOf("删除", "已读")) return emptyList()
+            if (isNotifTimeHeader(t) || t in setOf("删除", "已读")) return emptyList()
             val hasNavOrPhone = orderedLines.indices.any { j ->
                 j != i && isSameRowBand(orderedLines[i], orderedLines[j], medH) &&
                     orderedLines[j].text.trim().let { it == "导航" || it == "电话" }

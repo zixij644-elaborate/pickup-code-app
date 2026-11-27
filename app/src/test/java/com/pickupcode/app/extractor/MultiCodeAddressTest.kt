@@ -184,4 +184,36 @@ class MultiCodeAddressTest {
         assertEquals("河南阳光学院三餐厅后,8A宿舍楼门口", AddressExtractor.extractAddressForCode(shuffled, "4-5-6017", codes))
         assertEquals("河南阳光学院7号宿舍楼东圆通快递店", AddressExtractor.extractAddressForCode(shuffled, "66-5-7013", codes))
     }
+
+    @Test
+    @DisplayName("版式A含送达时间行：同地址框下第二个码不被「今天15:07已按预计时间送达」阻断继承")
+    fun patternA_withDeliveryTimestampLineStillInheritsGroupHeader() {
+        val lines = listOf(
+            line("河科院三餐申通菜鸟驿站", 160),
+            line("取件出示单号后五位 55637 >", 210),
+            line("申通快递: 777467057355637", 242),
+            line("今天09:56已按预计时间送达", 274),
+            line("查看订单详情>", 306),
+
+            line("科技学院中国邮政", 360, 40, 200),
+            line("导航", 360, 500, 50),
+            line("科技学院一餐厅东侧", 390),
+            line("取件码 17-8-5807 >", 440),
+            line("邮政快递包裹: 9841372623431", 472),
+            line("今天15:07已按预计时间送达", 504),
+            line("查看订单详情>", 536),
+            line("取件码 18-4-5424 >", 590),
+            line("邮政快递包裹: 9841382524801", 622),
+            line("今天09:38已按预计时间送达", 654),
+            line("查看订单详情>", 686)
+        )
+        val codes = CodeExtractor.extract(lines, 1400).map { it.code }
+        assertTrue("55637" in codes)
+        assertTrue("17-8-5807" in codes)
+        assertTrue("18-4-5424" in codes)
+
+        assertEquals("河科院三餐申通菜鸟驿站", AddressExtractor.extractAddressForCode(lines, "55637", codes))
+        assertEquals("科技学院一餐厅东侧", AddressExtractor.extractAddressForCode(lines, "17-8-5807", codes))
+        assertEquals("科技学院一餐厅东侧", AddressExtractor.extractAddressForCode(lines, "18-4-5424", codes))
+    }
 }
