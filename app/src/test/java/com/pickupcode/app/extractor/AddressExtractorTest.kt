@@ -166,8 +166,8 @@ class AddressExtractorTest {
     }
 
     @Test
-    @DisplayName("multi-code screen keeps high-confidence full address")
-    fun resolveAddress_multiCodeKeepsHighConfidence() {
+    @DisplayName("multi-code screen suppresses full-screen fallback to avoid cross-card leakage")
+    fun resolveAddress_multiCodeSuppressesHighConfidenceFallback() {
         val ls = listOf(
             com.pickupcode.app.ocr.OCREngine.TextLine("取件码281849", null, 1.0f),
             com.pickupcode.app.ocr.OCREngine.TextLine("已放至建设南路菜鸟驿站", null, 1.0f)
@@ -176,7 +176,7 @@ class AddressExtractorTest {
         val full = AddressExtractor.extractAddress(ls, allText)
         assertTrue(full.contains("建设南路"), "S5 应提取到地址, got: $full")
         val addr = AddressExtractor.resolveAddress(ls, allText, "", full, multiCodeOnScreen = true)
-        assertEquals(full, addr, "多码同屏高置信来源照常采信")
+        assertEquals("", addr, "多码同屏禁止把其他卡的高置信全屏地址广播给空地址码")
     }
 
     @Test
