@@ -24,7 +24,8 @@ object AddressExtractor {
     private val ADDR_LANDMARK = Regex("(菜鸟|驿站|快递柜|丰巢|超市|诊所|对面|门口|小区|大厦|医院|银行|学校|商场|广场|中心|公寓|写字楼|工业园|科技园|物流园|产业园|代收点|便利店|商行|门面|花园|家园|宿舍|中学|孵化园)")
     private val ADDR_AFTER_TO = Regex("到(.+?)(领取|取件|门店|取运单尾号|取运单|取您|取你的|取貨|取货|取走|取你)")
     private val ADDR_LABEL = Regex("地址[:：]\\s*(.+)")
-    private val ADDR_PLACED = Regex("(?:已放至|已暂存至|已放入|送达)\\s*([^，,。.\\n]{4,80})")
+    private val ADDR_PLACED = Regex("(?:已存放至|存放至|已放至|已暂存至|已存至|已放入|已到达|已到|送达)\\s*([^，,。.；;！!\\n]{4,80})")
+    private val PLACED_TRAIL_CUT = Regex("(?:请凭|凭取[件货餐单]?码|凭码|及时取件|取件码|取货码).*$")
     private val CABINET_NUM = Regex("(\\d+)号柜")
     private val PAREN_ADDR = Regex("\\uFF08([^\\uFF09]*[路街段柜])\\uFF09")
     // 品牌前导 2~10 汉字（S-Coupon 循环内逐行匹配，提为常量避免重编译）
@@ -32,8 +33,8 @@ object AddressExtractor {
     // 「地址:」标签标记（S0b 与 extractAddressForCode 共用）
     private val REG_ADDR_LABEL_MARK = Regex("地址[:：]")
 
-    /** 快递运单号行（品牌+快递后缀+冒号/空格+长数字串），如 中通快递:79152640318774——非地址。 */
-    private val COURIER_TRACKING_LINE = Regex("(?:快递|速递|物流|速运|驿站|智能柜)[:：]?\\s*\\d{9,}")
+    /** 快递运单号行（品牌+快递后缀+冒号/空格+字母数字单号），如 中通快递:79152640318774 / 极兔速递 JT5550520520975——非地址且作为卡片下沿封口。 */
+    private val COURIER_TRACKING_LINE = Regex("(?:快递|速递|物流|速运|驿站|智能柜)(?:包裹)?[:：]?\\s*(?:[A-Za-z]{1,5}\\d{8,}|\\d{9,})")
 
     // ---------------------------------------------------------------
     // 长度/几何容差常量（各步骤共用，按语义分开命名）
@@ -388,12 +389,12 @@ object AddressExtractor {
     }
     }
 
-    /** S5: "已放至/已暂存至" 句式。 */
+    /** S5: "已放至/已存放至/已暂存至/已到" 句式。 */
     private fun stepPlacedPhrase(allText: String, st: LocationState) {
-    // S5: "已放至/已暂存至" pattern
+    // S5: "已放至/已存放至/已暂存至/已到" pattern
     if (st.fullAddress.isEmpty()) {
         ADDR_PLACED.find(allText)?.let { m ->
-            val a = m.groupValues[1].trim()
+            val a = m.groupValues[1].replace(PLACED_TRAIL_CUT, "").trim()
             if (isAddressLike(a)) { st.fullAddress = stripBrackets(a).take(MAX_ADDRESS_LEN); st.addrFrom = "S5-placed" }
         }
     }
@@ -616,70 +617,309 @@ object AddressExtractor {
     }
 
 
-    /**
-     * 该行是否落在 `code` 所在的**通知卡片窗口**内（±3 行且 y 距离 ≤400px）。
-     *
-     * 供上层判断"预存地址只作用于命中关键词那一行所属的那个码" ——
-     * 多码同屏时，一条预存地址不能被套到所有码上。
-     * 与 [extractAddressForCode] 共用同一套窗口规则（[inCodeWindow]），避免两处漂移。
-     */
-    fun isLineInCodeWindow(lines: List<OCREngine.TextLine>, code: String, lineIndex: Int): Boolean {
-        if (lines.isEmpty() || lineIndex !in lines.indices) return false
-        val codeIdx = lines.indexOfFirst { it.text.contains(code) }
-        if (codeIdx < 0) return false
-        val codeBoxTop = lines[codeIdx].boundingBox?.let { it.top.toFloat() }
-        return inCodeWindow(lines, codeIdx, codeBoxTop, lineIndex)
+    // ---------------------------------------------------------------
+    // 多码同框卡片边界切分 & 逐卡提取
+    // ---------------------------------------------------------------
+
+    /** 卡片底部封口词（出现即终止向下扫描；向上扫描时作为上张卡的隔离墙）。 */
+    private val CARD_FOOTER_WORDS = listOf(
+        "查看订单详情", "查看全部", "确认收货", "延长收货", "申请退款", "申请售后",
+        "进入小程序查看", "复制验证码", "相关资讯"
+    )
+    /** 通知卡片底部纯操作按钮（整行匹配或极短行，避免误伤地址）。 */
+    private val CARD_ACTION_EXACT = setOf("删除", "已读", "回复", "导航", "电话", "复制", "拨打电话")
+    /** 电商订单卡片上半部交易区阻断词（Pattern D：向上封顶，把卖家网店名/商品名挡在取件条外）。 */
+    private val ORDER_UPPER_BARRIER = listOf("确认收货", "申请退款", "申请售后", "延长收货", "实付", "实付款", "先用后付")
+    /** 通知栏时间头（如 昨天17:10 / 52分钟前 / 10:56 / 8月17日）。 */
+    private val NOTIF_TIME_HEADER = Regex("(?:昨天|今天|前天)?\\s*\\d{1,2}[:：]\\d{2}|\\d{1,2}分钟前|\\d{1,2}小时前|\\d{1,2}月\\d{1,2}日")
+    /** 其他取件码行特征（未传入 allCodes 时用于自动识别兄弟码锚点）。 */
+    private val SIBLING_CODE_LINE = Regex(
+        "(?:取[餐件货单]码|取餐号|取单号|提取码|凭\\s*[A-Za-z0-9\\-]{2,12}|出示[^0-9]{0,8}(?:运单|快递单|快件单)?号?\\s*后)"
+    )
+
+    /** 判断文本行是否包含指定码值（对齐 CodeExtractor 归一化 + 字母数字边界保护）。 */
+    private fun lineContainsCode(rawText: String, code: String): Boolean {
+        if (code.isBlank()) return false
+        val norm = OcrCorrections.apply(CodeExtractor.normalizeText(rawText))
+        val re = Regex("(?<![\\dA-Za-z])${Regex.escape(code)}(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
+        if (re.containsMatchIn(norm)) return true
+        return norm.contains(code, ignoreCase = true)
     }
 
-    /** 卡片窗口规则（唯一实现）。`otherIdx == codeIdx` 视为不在窗口内（地址总在码行之外）。 */
-    private fun inCodeWindow(
-        lines: List<OCREngine.TextLine>,
-        codeIdx: Int,
-        codeBoxTop: Float?,
-        otherIdx: Int
-    ): Boolean {
-        if (otherIdx == codeIdx) return false
-        if (otherIdx !in lines.indices) return false
-        if (kotlin.math.abs(otherIdx - codeIdx) > CARD_LINE_WINDOW) return false
-        val b = lines[otherIdx].boundingBox ?: return true
-        val cIdxBox = lines[codeIdx].boundingBox
-        if (cIdxBox != null && codeBoxTop != null) {
-            return kotlin.math.abs(b.top.toFloat() - codeBoxTop) <= CARD_WINDOW_Y_GAP
+    /** 定位码所在行下标（先按词边界精确匹配，再退回归一化包含匹配）。 */
+    private fun findCodeLineIndices(orderedLines: List<OCREngine.TextLine>, code: String): List<Int> {
+        if (code.isBlank()) return emptyList()
+        val re = Regex("(?<![\\dA-Za-z])${Regex.escape(code)}(?![\\dA-Za-z])", RegexOption.IGNORE_CASE)
+        val exact = mutableListOf<Int>()
+        val loose = mutableListOf<Int>()
+        orderedLines.forEachIndexed { idx, tl ->
+            val norm = OcrCorrections.apply(CodeExtractor.normalizeText(tl.text))
+            if (re.containsMatchIn(norm)) exact.add(idx)
+            else if (norm.contains(code, ignoreCase = true)) loose.add(idx)
         }
-        return true
+        return if (exact.isNotEmpty()) exact else loose
+    }
+
+    private fun medianLineHeight(lines: List<OCREngine.TextLine>): Float {
+        val heights = lines.mapNotNull { it.boundingBox?.height()?.takeIf { h -> h > 0 } }.sorted()
+        return if (heights.isEmpty()) 24f else heights[heights.size / 2].toFloat()
+    }
+
+    private fun isSameRowBand(a: OCREngine.TextLine, b: OCREngine.TextLine, medH: Float): Boolean {
+        val ba = a.boundingBox ?: return false
+        val bb = b.boundingBox ?: return false
+        val tol = maxOf(minOf(ba.height(), bb.height()) * 0.65f, medH * 0.55f, 12f)
+        return kotlin.math.abs(ba.centerY() - bb.centerY()) <= tol
+    }
+
+    private fun isFooterLine(text: String): Boolean {
+        val t = text.trim()
+        return CARD_FOOTER_WORDS.any { t.contains(it) } || t == "删除" || t == "已读"
+    }
+
+    private fun isHeaderLine(orderedLines: List<OCREngine.TextLine>, idx: Int, medH: Float): Boolean {
+        val cur = orderedLines[idx]
+        val t = cur.text.trim()
+        if (t.startsWith("【") && !t.contains("码")) return true
+        if (NOTIF_TIME_HEADER.containsMatchIn(t)) return true
+        // 同横带右侧有「导航」或「电话」按钮（拼多多分组头 / 取快递卡片头）
+        val hasSideButton = orderedLines.indices.any { j ->
+            j != idx && isSameRowBand(cur, orderedLines[j], medH) &&
+                orderedLines[j].text.trim().let { it == "导航" || it == "电话" }
+        }
+        if (hasSideButton) return true
+        return t.endsWith("导航") || t.endsWith("电话")
+    }
+
+    private fun isSiblingCodeLine(
+        orderedLines: List<OCREngine.TextLine>,
+        idx: Int,
+        targetCode: String,
+        allCodes: List<String>
+    ): Boolean {
+        val text = orderedLines[idx].text
+        if (lineContainsCode(text, targetCode)) return false
+        for (c in allCodes) {
+            if (!c.equals(targetCode, ignoreCase = true) && lineContainsCode(text, c)) return true
+        }
+        return allCodes.isEmpty() && SIBLING_CODE_LINE.containsMatchIn(text)
     }
 
     /**
-     * 按码定位提取专属地址（多驿站通知中心场景）。
-     * 在「码所在行附近的通知卡片窗口」内找该码的取件地址，而不是全屏抓一个地址。
-     * 码行 ±3 行 且 y 距离 ≤ 400px 视为同一通知卡片。
+     * 计算 `codeIdx` 所属卡片的索引集合（含码行自身，按阅读序排列）。
+     * 仅在自身封口区间内取行；若未找到任何地址且属于「驿站分组一头挂多卡」（Pattern A），
+     * 可通过 [findGroupHeaderLines] 向上继承分组头。
      */
-    fun extractAddressForCode(lines: List<OCREngine.TextLine>, code: String): String {
+    private fun cardIndicesForOccurrence(
+        orderedLines: List<OCREngine.TextLine>,
+        codeIdx: Int,
+        targetCode: String,
+        allCodes: List<String>
+    ): List<Int> {
+        val medH = medianLineHeight(orderedLines)
+        val codeLine = orderedLines[codeIdx]
+        val codeBox = codeLine.boundingBox
+        val hasBox = codeBox != null
+        val maxUpPx = maxOf(medH * 11f, 280f)
+        val maxDownPx = maxOf(medH * 12f, 340f)
+        val gapCutPx = maxOf(medH * 2.2f, 55f)
+
+        val selected = linkedSetOf(codeIdx)
+
+        // 1) 向上封顶
+        var prevTopY = codeBox?.top
+        var prevIdx = codeIdx
+        for (i in codeIdx - 1 downTo 0) {
+            val cur = orderedLines[i]
+            val t = cur.text.trim()
+            if (t.isEmpty()) continue
+            val curBox = cur.boundingBox
+            if (hasBox && curBox != null) {
+                if (codeBox!!.top - curBox.bottom > maxUpPx) break
+                if (prevTopY != null && prevTopY - curBox.bottom > gapCutPx && !isSameRowBand(cur, orderedLines[prevIdx], medH)) break
+            } else if (codeIdx - i > CARD_LINE_WINDOW + 1) {
+                break
+            }
+            if (isSiblingCodeLine(orderedLines, i, targetCode, allCodes) && !isSameRowBand(cur, codeLine, medH)) break
+            if (ORDER_UPPER_BARRIER.any { t.contains(it) }) break
+            if (CARD_FOOTER_WORDS.any { t.contains(it) } || t in setOf("删除", "已读") || COURIER_TRACKING_LINE.containsMatchIn(t)) break
+
+            selected.add(i)
+            if (curBox != null) prevTopY = minOf(prevTopY ?: curBox.top, curBox.top)
+            prevIdx = i
+
+            // 命中本卡头栏：把同横带的头栏行一并收进后封顶
+            if (isHeaderLine(orderedLines, i, medH)) {
+                for (j in i - 1 downTo 0) {
+                    if (isSameRowBand(cur, orderedLines[j], medH)) selected.add(j) else break
+                }
+                break
+            }
+        }
+
+        // 2) 向下封底
+        var prevBottomY = codeBox?.bottom
+        prevIdx = codeIdx
+        for (i in codeIdx + 1 until orderedLines.size) {
+            val cur = orderedLines[i]
+            val t = cur.text.trim()
+            if (t.isEmpty()) continue
+            val curBox = cur.boundingBox
+            if (hasBox && curBox != null) {
+                if (curBox.top - codeBox!!.bottom > maxDownPx) break
+                if (prevBottomY != null && curBox.top - prevBottomY > gapCutPx && !isSameRowBand(cur, orderedLines[prevIdx], medH)) break
+            } else if (i - codeIdx > CARD_LINE_WINDOW) {
+                break
+            }
+            if (isSiblingCodeLine(orderedLines, i, targetCode, allCodes) && !isSameRowBand(cur, codeLine, medH)) break
+            if (isHeaderLine(orderedLines, i, medH) && !isSameRowBand(cur, codeLine, medH)) break
+            if (isFooterLine(t) && !isSameRowBand(cur, codeLine, medH)) break
+            // 订单列表底部取件条（版式D：`待取件 取件码XXX | 某快递:`）本身就是该订单卡的最后一行，不再向下扫入下一张订单卡
+            if (codeLine.text.contains("待取件") && (codeLine.text.contains("|") || codeLine.text.contains("｜"))) break
+            selected.add(i)
+            if (curBox != null) prevBottomY = maxOf(prevBottomY ?: curBox.bottom, curBox.bottom)
+            prevIdx = i
+            if (COURIER_TRACKING_LINE.containsMatchIn(t)) break
+        }
+
+        return selected.sorted()
+    }
+
+    /**
+     * 版式 A（驿站分组「一头挂多卡」）向上查找所属分组头行。
+     * 仅当当前码上方只经过兄弟子卡（取件码/运单号/查看订单详情），未经过电商交易按钮或独立通知时间头时，
+     * 才继承上方最近的「导航/电话」站点分组头及紧随其后的详细地址行。
+     */
+    private fun findGroupHeaderLines(
+        orderedLines: List<OCREngine.TextLine>,
+        codeIdx: Int
+    ): List<OCREngine.TextLine> {
+        val medH = medianLineHeight(orderedLines)
+        for (i in codeIdx - 1 downTo 0) {
+            val t = orderedLines[i].text.trim()
+            if (ORDER_UPPER_BARRIER.any { t.contains(it) }) return emptyList()
+            if (NOTIF_TIME_HEADER.containsMatchIn(t) || t in setOf("删除", "已读")) return emptyList()
+            val hasNavOrPhone = orderedLines.indices.any { j ->
+                j != i && isSameRowBand(orderedLines[i], orderedLines[j], medH) &&
+                    orderedLines[j].text.trim().let { it == "导航" || it == "电话" }
+            }
+            if (hasNavOrPhone || t.endsWith("导航") || t.endsWith("电话")) {
+                val out = mutableListOf<OCREngine.TextLine>()
+                // 收进同横带标题 + 下方紧邻 1~2 行地址（直到第一张子卡或分隔线）
+                for (j in maxOf(0, i - 1)..minOf(orderedLines.lastIndex, i + 3)) {
+                    val lj = orderedLines[j]
+                    val tj = lj.text.trim()
+                    if (j > i && !isSameRowBand(orderedLines[i], lj, medH)) {
+                        if (SIBLING_CODE_LINE.containsMatchIn(tj) || COURIER_TRACKING_LINE.containsMatchIn(tj)) break
+                        if (CARD_FOOTER_WORDS.any { tj.contains(it) }) break
+                    }
+                    out.add(lj)
+                }
+                return out
+            }
+        }
+        return emptyList()
+    }
+
+    /**
+     * 对外提供：获取指定码专属的卡片行集合（供逐卡预存地址匹配、逐卡柜号、逐卡运单号复用）。
+     * 若本卡内无地址且属于「驿站分组一头挂多卡」（版式 A），会把所属分组头行一并附上。
+     */
+    fun cardLinesForCode(
+        lines: List<OCREngine.TextLine>,
+        code: String,
+        allCodes: List<String> = emptyList()
+    ): List<OCREngine.TextLine> {
+        if (lines.isEmpty()) return emptyList()
+        val ordered = OCREngine.sortReadingOrder(lines)
+        val occs = findCodeLineIndices(ordered, code)
+        if (occs.isEmpty()) return emptyList()
+        val codeIdx = occs.first()
+        val indices = cardIndicesForOccurrence(ordered, codeIdx, code, allCodes)
+        val cardLines = indices.map { ordered[it] }
+        if (extractAddressWithinCard(cardLines, ordered[codeIdx]).isNotBlank()) return cardLines
+        val groupHeader = findGroupHeaderLines(ordered, codeIdx)
+        return if (groupHeader.isNotEmpty()) (groupHeader + cardLines).distinct() else cardLines
+    }
+
+    /**
+     * 将 OCR 行按视觉阅读顺序整理成适合纯文本 AI 阅读的多行文本，
+     * 在纵向大留白断层处插入分隔线 `---`，帮助纯文本 AI 识别卡片边界。
+     */
+    fun formatTextForAi(lines: List<OCREngine.TextLine>): String {
         if (lines.isEmpty()) return ""
-        val codeIdx = lines.indexOfFirst { it.text.contains(code) }
-        if (codeIdx < 0) return ""
-        val codeBoxTop = lines[codeIdx].boundingBox?.let { it.top.toFloat() }
+        val ordered = OCREngine.sortReadingOrder(lines)
+        val medH = medianLineHeight(ordered)
+        val gapCutPx = maxOf(medH * 2.2f, 55f)
+        val sb = StringBuilder()
+        var prevBox: OCREngine.LineBox? = null
+        for (line in ordered) {
+            val t = line.text.trim()
+            if (t.isEmpty()) continue
+            val box = line.boundingBox
+            if (sb.isNotEmpty()) {
+                if (prevBox != null && box != null && box.top - prevBox.bottom > gapCutPx) {
+                    sb.append("\n---\n")
+                } else {
+                    sb.append('\n')
+                }
+            }
+            sb.append(t)
+            if (box != null) prevBox = box
+        }
+        return sb.toString()
+    }
 
-        fun inWindow(otherIdx: Int): Boolean = inCodeWindow(lines, codeIdx, codeBoxTop, otherIdx)
+    /**
+     * 供预存地址判定某原始下标行是否属于 `code` 所在卡片窗口。
+     */
+    fun isLineInCodeWindow(
+        lines: List<OCREngine.TextLine>,
+        code: String,
+        lineIndex: Int,
+        allCodes: List<String> = emptyList()
+    ): Boolean {
+        if (lines.isEmpty() || lineIndex !in lines.indices) return false
+        val ordered = OCREngine.sortReadingOrder(lines)
+        val targetLine = lines[lineIndex]
+        val occs = findCodeLineIndices(ordered, code)
+        if (occs.isEmpty()) return false
+        for (codeIdx in occs) {
+            if (ordered[codeIdx] === targetLine) continue
+            val cardIdxSet = cardIndicesForOccurrence(ordered, codeIdx, code, allCodes).toSet()
+            val targetIdx = ordered.indexOfFirst { it === targetLine }
+            if (targetIdx in cardIdxSet) {
+                if (kotlin.math.abs(targetIdx - codeIdx) > CARD_LINE_WINDOW) continue
+                // 保持旧契约：±CARD_LINE_WINDOW 且 Y 差 ≤ 400（当未越界到其他卡时）
+                val b = targetLine.boundingBox
+                val c = ordered[codeIdx].boundingBox
+                if (b != null && c != null && kotlin.math.abs(b.top - c.top) > CARD_WINDOW_Y_GAP) continue
+                return true
+            }
+        }
+        return false
+    }
 
-        // 窗口内的行（按 y 排序，从码行下方优先——地址/取件说明通常在码下方）
-        val windowLines = lines
-            .filterIndexed { i, _ -> inWindow(i) }
-            .sortedBy { it.boundingBox?.top ?: 0 }
-        if (windowLines.isEmpty()) return ""
-        val windowText = windowLines.joinToString(" ") { it.text }
+    /**
+     * 按码定位提取专属地址（多卡同框核心入口）。
+     * 先按阅读序重排 + 卡片上下封口切出本卡专属行，再在卡内跑完整地址提取；
+     * 若本卡无地址且属「驿站分组一头挂多卡」，向上继承所属分组头地址。
+     */
+    fun extractAddressForCode(
+        lines: List<OCREngine.TextLine>,
+        code: String,
+        allCodes: List<String> = emptyList()
+    ): String {
+        if (lines.isEmpty()) return ""
+        val ordered = OCREngine.sortReadingOrder(lines)
+        val occs = findCodeLineIndices(ordered, code)
+        if (occs.isEmpty()) return ""
 
-        // 优先级 0（新增，2026-09-16 多码同框地址串台修复）：
-        // **行内含本码值**的「到…」句式 —— 地址与码写在同一行，是唯一不依赖窗口边界的硬证据。
-        // 真机/短信典型：凭9-4-1526到建设南路取您的快递；而相邻卡片的「凭3-7-4162到长兴路北段店」
-        // 在 ±3 行窗口里排在前面，旧实现按行号升序取第一个「到」→ 地址串台到别的码上。
-        for (i in lines.indices) {
-            val t = lines[i].text
-            if (!t.contains(code)) continue
+        // 优先级 0：含本码值的「到…取」硬绑定句式（不依赖边界）
+        for (i in occs) {
             for (span in 0..CARD_LINE_WINDOW) {
-                if (i + span >= lines.size) break
-                val combined = (i..i + span).joinToString("") { lines[it].text }
-                // 去掉本码值本身，避免「凭<码>」被当成地址片段
+                if (i + span >= ordered.size) break
+                val combined = (i..i + span).joinToString("") { ordered[it].text }
                 ADDR_AFTER_TO.find(combined)?.let { m0 ->
                     val clean0 = m0.groupValues[1].trim().replace(PING_NOISE_TRAIL, "").trim()
                     if (!clean0.startsWith("达") && isAddressLike(clean0)) {
@@ -689,23 +929,42 @@ object AddressExtractor {
             }
         }
 
-        // 优先级 1：S6 「到…取件/取用」句式（通知体最常见的地址锚点）
-        // 地址可能跨行（LINE8"…到长兴路与长青街…社区卫生" + LINE9"所对面2号柜H36…取您的快递"）
-        // 仅在本码 ±3 行的窗口内找；含「到」即尝试（同码头尾地址常在码行，无需同行的取件词）
-        val lo = (codeIdx - CARD_LINE_WINDOW).coerceAtLeast(0)
-        val hi = (codeIdx + CARD_LINE_WINDOW).coerceAtMost(lines.lastIndex)
-        for (i in lo..hi) {
-            val t = lines[i].text
+        // 依次尝试本码的每个出现位置（通常 1 个；重复通知时取能提取出地址的那个）
+        for (codeIdx in occs) {
+            val cardIndices = cardIndicesForOccurrence(ordered, codeIdx, code, allCodes)
+            val cardLines = cardIndices.map { ordered[it] }
+            val hit = extractAddressWithinCard(cardLines, ordered[codeIdx])
+            if (hit.isNotBlank()) return hit
+
+            // 版式 A：向上继承同驿站分组头
+            val groupHeader = findGroupHeaderLines(ordered, codeIdx)
+            if (groupHeader.isNotEmpty()) {
+                val groupHit = extractAddressWithinCard(groupHeader, ordered[codeIdx])
+                if (groupHit.isNotBlank()) return groupHit
+            }
+        }
+        return ""
+    }
+
+    /** 在单张已切分好的卡片行内提取最准确的取件地址。 */
+    private fun extractAddressWithinCard(
+        cardLines: List<OCREngine.TextLine>,
+        codeLine: OCREngine.TextLine
+    ): String {
+        if (cardLines.isEmpty()) return ""
+        val cardText = cardLines.joinToString(" ") { it.text }
+
+        // 1. 「到…取件」单行 + 跨行（仅在卡内）
+        for (i in cardLines.indices) {
+            val t = cardLines[i].text
             if (!t.contains("到")) continue
-            // 单行先试（排除"到达/已到达"动词：捕获以"达"开头说明是"到达xx"误抽，非地址介词"到"）
             ADDR_AFTER_TO.find(t)?.let { m6 ->
                 val clean0 = m6.groupValues[1].trim().replace(PING_NOISE_TRAIL, "").trim()
                 if (!clean0.startsWith("达") && isAddressLike(clean0)) return stripBrackets(clean0).take(MAX_ADDRESS_LEN)
             }
-            // 跨行向下拼接 1~3 行
             for (span in 1..CARD_LINE_WINDOW) {
-                if (i + span >= lines.size) break
-                val combined = (i..i + span).joinToString("") { lines[it].text }
+                if (i + span >= cardLines.size) break
+                val combined = (i..i + span).joinToString("") { cardLines[it].text }
                 ADDR_AFTER_TO.find(combined)?.let { m6b ->
                     val clean0 = m6b.groupValues[1].trim().replace(PING_NOISE_TRAIL, "").trim()
                     if (!clean0.startsWith("达") && isAddressLike(clean0)) return stripBrackets(clean0).take(MAX_ADDRESS_LEN)
@@ -713,22 +972,31 @@ object AddressExtractor {
             }
         }
 
-        // 优先级 2：地址: 标签
-        // 优先级 2：地址: 标签（含退化标签补全——如 地址:长兴路长兴路新 时取下方干净地址行）
-        val labLine = windowLines.firstOrNull { it.text.contains(REG_ADDR_LABEL_MARK) }
+        // 2. 「已放至/已存放至/已到…」句式（通知栏/淘宝同行卡片）
+        ADDR_PLACED.find(cardText)?.let { m ->
+            val clean = m.groupValues[1].replace(PLACED_TRAIL_CUT, "").trim()
+            if (isAddressLike(clean)) return stripBrackets(clean).take(MAX_ADDRESS_LEN)
+        }
+
+        // 3. 显式地址标签 / 两列键值布局（S0 / S0b / S0c）
+        val st = LocationState()
+        stepExplicitLabel(cardLines, st)
+        if (st.fullAddress.isNotEmpty()) return st.fullAddress
+        stepColumnLayout(cardLines, st)
+        if (st.fullAddress.isNotEmpty()) return st.fullAddress
+
+        val labLine = cardLines.firstOrNull { it.text.contains(REG_ADDR_LABEL_MARK) }
         if (labLine != null) {
             val a0 = cleanAddress(ADDR_LABEL.find(labLine.text)?.groupValues?.get(1).orEmpty())
             if (isAddressLike(a0) && a0.length >= MIN_ADDRESS_CORE_LEN) {
-                // 前缀命中同行更完整行 或 同前缀更长行
                 val p4 = a0.substring(0, MIN_ADDRESS_CORE_LEN)
-                val byPrefix = windowLines.map { it.text.trim() }
+                val byPrefix = cardLines.map { it.text.trim() }
                     .filter { it.length > a0.length && it.startsWith(p4) && isAddressLike(it) }
                     .maxByOrNull { it.length }
                 if (byPrefix != null) return byPrefix.take(MAX_ADDRESS_LEN)
             }
-            // 标签值退化/短时：取标签行下方邻近的干净完整地址（同一通知卡片区域）
             val labY = labLine.boundingBox?.let { it.top.toFloat() } ?: 0f
-            val nearby = windowLines
+            val nearby = cardLines
                 .filter { tl ->
                     val y = tl.boundingBox?.let { it.top.toFloat() } ?: 0f
                     y > labY && y - labY < LABEL_NEARBY_Y_GAP && tl.text.trim().length > a0.length
@@ -740,11 +1008,28 @@ object AddressExtractor {
             if (isAddressLike(a0)) return a0.take(MAX_ADDRESS_LEN)
         }
 
-        // 优先级 3：窗口内最长的像地址行
-        val best = windowLines
-            .map { it.text.trim() }
-            .filter { isAddressLike(it) }
-            .maxByOrNull { it.length }
+        // 4. 卡内最佳地址行：优先无省略号截断、正常字号（过滤商品缩略图小字）、含明确地标词，同档按离码行最近（无坐标取最长）
+        val codeCy = codeLine.boundingBox?.centerY()
+        val medH = medianLineHeight(cardLines)
+        val candidates = cardLines
+            .map { it to it.text.trim() }
+            .filter { (_, t) -> isAddressLike(t) }
+        if (candidates.isEmpty()) return ""
+
+        val best = candidates.minWithOrNull(
+            compareBy<Pair<OCREngine.TextLine, String>>(
+                { (_, t) -> t.contains("…") || t.contains("..") }, // false(完整) 排前面
+                { (tl, _) ->
+                    val h = tl.boundingBox?.height()
+                    h != null && h < medH * 0.65f // 过滤商品缩略图极小字
+                },
+                { (_, t) -> -t.length }, // 同卡内详细街道地址比4字站点标题更长、更具体
+                { (tl, _) ->
+                    val cy = tl.boundingBox?.centerY()
+                    if (codeCy != null && cy != null) kotlin.math.abs(cy - codeCy) else 0
+                }
+            )
+        )?.second
         return best?.take(MAX_ADDRESS_LEN) ?: ""
     }
 
@@ -786,8 +1071,8 @@ object AddressExtractor {
         if (perCodeAddr.isNotBlank()) return perCodeAddr
         if (fullAddress.isBlank()) return ""
         if (!multiCodeOnScreen) return fullAddress
-        val loc = extractLocation(lines, allText)
-        return if (loc.addrFrom in HIGH_CONFIDENCE_SOURCES) fullAddress else ""
+        // 多码同屏时禁止把单卡提取到的全屏地址广播给其他未命中地址的码，宁缺毋滥
+        return ""
     }
 
     /**
@@ -990,6 +1275,9 @@ object AddressExtractor {
         // （如「退货包运费保障中」「家用大号桌面键盘书桌写字垫」「承诺达退货包运费保障中」），
         // 但绝不可能是指件地址 —— 宁可该码地址为空（走兜底/留空），也不要把垃圾写进记录。
         if (ADDR_MARKETING_NOISE.any { t.contains(it) }) return false
+        // Exclude 商品促销等式/网店名（如 动态贴合+慢回弹=零压记忆棉床垫、蒋小俊的铺子 >、我的宝儿文具店 >）
+        if (t.contains("=") || listOf("铺子", "文具店", "官方店", "企业店", "小店").any { t.contains(it) }) return false
+        if (t.endsWith(">") && !ADDR_LANDMARK.containsMatchIn(t) && !t.contains("快递") && !t.contains("代收")) return false
         // Exclude 价格串（¥10.8 / 9.9元 / 22.1）
         if (PRICE_LIKE.containsMatchIn(t)) return false
         // Exclude 订单/交易/UI 界面标签（如 OCR 把「订单详情」读成 订单详惰、交易快照、券号/券码等）——不是取件地址
