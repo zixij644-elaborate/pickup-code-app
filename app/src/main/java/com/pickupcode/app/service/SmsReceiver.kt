@@ -73,12 +73,6 @@ class SmsReceiver : BroadcastReceiver() {
                     if (!settings.enableSmsReceive) return@withTimeoutOrNull
                     if (!settings.enableParcelCodes && !settings.enableFoodCodes) return@withTimeoutOrNull
 
-                    // 金融/支付噪音拦截（短信里银行/支付通知的数字极易被当取件码）
-                    if (CodeExtractor.isFinancialNoise(body)) {
-                        Log.d(TAG, "短信为金融/支付类，跳过")
-                        return@withTimeoutOrNull
-                    }
-
                     val lines = body.lines()
                         .map { OCREngine.TextLine(text = it.trim(), boundingBox = null, confidence = 1.0f) }
                         .filter { it.text.isNotBlank() }

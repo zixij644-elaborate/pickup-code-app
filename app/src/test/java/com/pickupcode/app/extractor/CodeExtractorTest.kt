@@ -31,26 +31,17 @@ class CodeExtractorTest {
         assertEquals("1-2", CodeExtractor.normalizeText("1—2"))
     }
 
-    // ── isFinancialNoise：金融词拦截 ──
+    // ── 局部行内噪音拦截（已移除整屏 isFinancialNoise 闸门，避免误杀同屏真码） ──
     @Test
-    @DisplayName("金融词且无快递词 → 判定噪音")
-    fun finance_noise() {
-        assertTrue(CodeExtractor.isFinancialNoise("您的余额为 100 元"))
-        assertTrue(CodeExtractor.isFinancialNoise("支付宝到账 50 元"))
-        assertTrue(CodeExtractor.isFinancialNoise("信用卡还款提醒"))
-    }
-
-    @Test
-    @DisplayName("金融词 + 快递词 → 放行")
-    fun finance_with_express() {
-        assertFalse(CodeExtractor.isFinancialNoise("您的快递已到，取件码 3-7-4162"))
-        assertFalse(CodeExtractor.isFinancialNoise("包裹驿站取件通知，微信支付已扣"))
-    }
-
-    @Test
-    @DisplayName("空文本 → 非噪音")
-    fun finance_blank() {
-        assertFalse(CodeExtractor.isFinancialNoise(""))
+    @DisplayName("验证码/交易时间仅拦截当前行候选，不阻断同屏其他真码")
+    fun localNoiseGuard_doesNotBlockSiblingCodes() {
+        val r1 = CodeExtractor.extract(listOf(line("【工信部反诈中心】验证码：431214")))
+        assertTrue(r1.isEmpty(), "验证码数字不应提取: $r1")
+        val r2 = CodeExtractor.extract(listOf(
+            line("【某银行】储蓄卡消费验证码 618008，柜台业务请咨询"),
+            line("【菜鸟驿站】您的取件码 3-7-4162 已到")
+        ))
+        assertEquals(listOf("3-7-4162"), r2.map { it.code }, "银行验证码同屏不得误杀取件码")
     }
 
     // ── extract：核心提取 ──
@@ -233,38 +224,13 @@ class CodeExtractorTest {
     }
 
     @Test
-    @DisplayName("餐饮取餐截图带支付信息不被金融闸门误杀（取单码+微信支付）")
-    fun financial_gate_keeps_dining_order() {
-        assertFalse(
-            CodeExtractor.isFinancialNoise("取单码 商品明细 LINLEE林里 微信支付 付款方式 实付14.8"),
-            "带取单码的餐饮截图不应判为金融噪音"
-        )
-        assertFalse(
-            CodeExtractor.isFinancialNoise("茶百道 排队提醒 取餐号 0147 微信支付已扣款"),
-            "带取餐号/排队的餐饮截图不应判为金融噪音"
-        )
-    }
-
-    @Test
-    @DisplayName("纯金融通知仍被金融闸门拦截（无取餐信号）")
-    fun financial_gate_blocks_pure_finance() {
-        assertTrue(
-            CodeExtractor.isFinancialNoise("您的信用卡还款 5000 元已到账"),
-            "无取餐信号的金融通知仍应拦截"
-        )
-    }
-
-    @Test
-    @DisplayName("团购券截图带『到店消费』不被金融闸门误杀（券号信号放行）")
-    fun financial_gate_keeps_coupon_context() {
-        assertFalse(
-            CodeExtractor.isFinancialNoise("请在2026.10.04前到店消费 本单有惊喜 还可获得5元无门槛券 券号1246 1046 4170 008 复制"),
-            "带券号的团购券截图不应判为金融噪音"
-        )
-        assertTrue(
-            CodeExtractor.isFinancialNoise("周三到店消费享5折，信用卡支付满减"),
-            "无券码信号的到店消费营销文本仍应拦截"
-        )
+    @DisplayName("餐饮取餐截图带支付信息不被误杀（取单码+微信支付）")
+    fun dining_order_with_payment_extracted() {
+        val r = CodeExtractor.extract(listOf(
+            line("取单码 商品明细 LINLEE林里 微信支付 付款方式 实付14.8"),
+            line("取餐号 0147")
+        ))
+        assertTrue(r.any { it.code == "0147" && it.type == CodeExtractor.CodeType.pickup_food })
     }
 
     @Test
@@ -296,32 +262,20 @@ class CodeExtractorTest {
         assertTrue(r.isEmpty(), "全0券号应被内容噪声检查拒绝: ${r.map { it.code }}")
     }
 
-    // ── 金融闸门：单字「柜」曾把银行验证码放行成取件码 ──
+    // ── 局部验证码/快递混合文案校验 ──
 
     @Test
-    @DisplayName("银行验证码短信里的「柜台」不得被当成快递信号")
-    fun finance_bankCounterNotExpressSignal() {
+    @DisplayName("银行验证码短信里的「柜台」与验证码 618008 不得提取为取件码")
+    fun finance_bankCounterNotExtracted() {
         val sms = "【某银行】储蓄卡消费验证码 618008，请勿告知他人，柜台业务请咨询"
-        // 闸门本体：命中金融词 + 无有效快递信号 → 判为噪音。
-        // 三个识别入口都靠它拦截（PickupCodeAccessibilityService:500 / ShareReceiver:343 / SmsReceiver:77），
-        // 所以这里断言 isFinancialNoise 就是断言"识别不会发生"。
-        assertTrue(CodeExtractor.isFinancialNoise(sms), "含金融词且只有「柜台」→ 应判为金融噪音")
-        // 修复前：EXPRESS_SIGNAL_KEYWORDS 含裸字「柜」，这句会被放行，长数字 618008 以取件码入库
+        assertTrue(CodeExtractor.extract(listOf(line(sms))).isEmpty())
     }
 
     @Test
-    @DisplayName("带快递信号的银行/支付混合文案仍放行（闸门不能修成误杀）")
+    @DisplayName("带快递信号的银行/支付混合文案仍正常提取")
     fun finance_withRealExpressSignalPasses() {
-        assertFalse(CodeExtractor.isFinancialNoise("【菜鸟驿站】您的取件码 3-7-4162，微信支付已扣款"))
-        assertFalse(CodeExtractor.isFinancialNoise("包裹已到快递柜，支付宝到账提醒已关闭"))
-    }
-
-    @Test
-    @DisplayName("「快递柜/智能柜」等复合词仍是有效快递信号")
-    fun finance_compoundCabinetStillExpress() {
-        assertFalse(CodeExtractor.isFinancialNoise("您的包裹已放入快递柜，取件码 1-2-3456"))
-        assertFalse(CodeExtractor.isFinancialNoise("包裹已存入丰巢智能柜，微信支付已完成"))
-        assertFalse(CodeExtractor.isFinancialNoise("取件柜 3 号，凭取件码 8-1-2233"))
+        val r = CodeExtractor.extract(listOf(line("【菜鸟驿站】您的取件码 3-7-4162，微信支付已扣款")))
+        assertEquals(listOf("3-7-4162"), r.map { it.code })
     }
 
     // ── 阈值基准：不能拿"最长候选"的分数当 top ──

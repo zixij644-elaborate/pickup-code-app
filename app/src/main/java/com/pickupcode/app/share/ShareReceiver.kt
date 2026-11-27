@@ -350,13 +350,6 @@ object ShareReceiver {
         val shareSourceName = shareSource?.name ?: ""
         val allText = lines.joinToString(" ") { it.text }
 
-        // 金融/支付噪音拦截：银行/支付/转账等通知截图里的数字（金额/验证码/余额）极易被当取件码。
-        // 命中金融词且无快递/取件信号词 → 整段不识别。（参考同类产品实现 isExpressRelatedSms）
-        if (CodeExtractor.isFinancialNoise(allText)) {
-            Log.d(TAG, "金融/支付噪音文本，跳过识别")
-            return
-        }
-
         val db = AppDatabase.getInstance(context)
         val settings = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }
         val allResults = mutableListOf<CodeExtractor.ExtractedCode>()

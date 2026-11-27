@@ -28,12 +28,8 @@ object CorpusRunner {
 
     fun run(f: CorpusFixture): CorpusResult {
         val failures = mutableListOf<String>()
-        val gated = CodeExtractor.isFinancialNoise(f.allText)
-        val results = if (gated) {
-            emptyList()
-        } else {
-            CodeExtractor.extract(f.lines, f.screenHeight, context = null, source = f.source)
-        }
+        val gated = false
+        val results = CodeExtractor.extract(f.lines, f.screenHeight, context = null, source = f.source)
         val actual = results.map { ExpectedCode(it.code, it.type) }
         val loc = AddressExtractor.extractLocation(f.lines, f.allText)
 

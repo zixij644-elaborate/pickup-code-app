@@ -502,15 +502,6 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         // Medium-2: 自动扫描（自动检测）静默，不弹"未识别"类提示，避免骚扰
         val silent = source.startsWith("自动")
 
-        // 金融/支付噪音拦截：银行、支付、转账等通知截图/短信里常出现数字（金额/验证码/余额）
-        // 极易被当成取件码。命中金融词且无快递/取件信号词 → 整段不识别。
-        if (CodeExtractor.isFinancialNoise(allText)) {
-            Log.d(TAG, "金融/支付噪音文本，跳过识别")
-            bmp?.recycle()
-            if (!silent) showResult("未识别到取餐码/取件码（疑似银行/支付类通知）")
-            return
-        }
-
         // 🔒 身份码 / 出库码页面：不识别、**不落盘截图**、不入库（身份码 = 取件凭证，见 SensitivePageGuard）
         // 自动扫描白名单含淘宝/菜鸟/拼多多，用户在这三个 App 里打开身份码页就会走到这里。
         if (com.pickupcode.app.util.SensitivePageGuard.isIdentityCodePage(allText)) {

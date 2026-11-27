@@ -173,53 +173,6 @@ object CodeExtractor {
     }
 
     // ---------------------------------------------------------------
-    // 金融/支付短信相关性拦截（参考同类产品实现 isExpressRelatedSms）
-    // 银行、支付类通知的截图/短信里常出现数字（金额、验证码、余额），极易被当成取件码。
-    // 规则：命中金融词且未命中快递词 → 判定为金融噪音，整段不识别。
-    // ---------------------------------------------------------------
-
-    /** 金融/支付强信号词：出现即高度怀疑是非取件的资金类通知。 */
-    private val FINANCIAL_KEYWORDS = listOf(
-        "银行", "信用卡", "借记卡", "储蓄卡", "账户", "出账", "入账", "到账", "余额",
-        "支付宝", "微信支付", "财付通", "账单", "消费", "转账", "退款", "还款",
-        "支付", "人民币", "收付款", "手续费", "交易", "红包到账", "零钱", "花呗", "借呗"
-    )
-
-    /** 快递/取件强信号词：与金融词对冲，命中则说明可能是含支付信息的取件通知。 */
-    private val EXPRESS_SIGNAL_KEYWORDS = listOf(
-        // ⚠️ 这里**不能出现单字词**：历史上含裸字「柜」，导致
-        // 「【xx银行】储蓄卡消费验证码 618008…柜台业务请咨询」被当成快递信号放行，长数字 618008 以取件码入库。
-        // 要表达"柜"必须用复合词；isFinancialNoise 另有长度 ≥2 的兜底校验，防止以后再被加进单字词。
-        "取件", "快递", "包裹", "驿站", "代收点", "货栈", "提货", "开箱", "运单", "取餐", "取餐码",
-        "快递柜", "智能柜", "自提柜", "取件柜", "云柜",
-        // 餐饮取餐信号：点单/排队截图常带支付信息（微信支付/实付），若无这些词会被金融闸门误杀
-        // （真机复测发现：LINLEE 取单码截图被金融噪音拦截）
-        "取餐号", "取单码", "取单号", "排队", "点单"
-    )
-
-    /** 券码上下文信号词：团购券/兑换码类截图（识别目标就是券号），命中即放行金融闸门。 */
-    private val COUPON_SIGNAL_KEYWORDS = listOf("券号", "券码", "兑换码", "团购券")
-
-    /**
-     * 判断一段文本是否为金融/支付类噪音（非取件场景）。
-     * 命中金融词且没有快递/取件信号词 → true（应拦截）。
-     * 同时命中两者 → false（可能是取件通知里带支付提醒，放行）。
-     * 命中券码信号词 → false（团购券截图带"到店消费/无门槛券"等金融词，
-     * 但识别目标恰是券号；银行/支付通知不会出现券号/券码/兑换码/团购券）。
-     */
-    fun isFinancialNoise(text: String): Boolean {
-        if (text.isBlank()) return false
-        val hasFinancial = FINANCIAL_KEYWORDS.any { text.contains(it, ignoreCase = true) }
-        if (!hasFinancial) return false
-        // 兜底：信号词必须 ≥2 字。单字（如「柜」）在中文里太常见，会被"柜台/柜员"这类金融文案误命中，
-        // 从而把金融验证码放行成取件码（历史上就是这么错的）。
-        val hasExpressSignal = EXPRESS_SIGNAL_KEYWORDS.any { it.length >= 2 && text.contains(it, ignoreCase = true) }
-        if (hasExpressSignal) return false
-        val hasCouponSignal = COUPON_SIGNAL_KEYWORDS.any { it.length >= 2 && text.contains(it) }
-        return !hasCouponSignal
-    }
-
-    // ---------------------------------------------------------------
     // Code extraction
     // ---------------------------------------------------------------
 
@@ -837,14 +790,20 @@ object CodeExtractor {
      * - 国标号：`GB/T19777`（山西老陈醋标准号）
      * - 座机区号前缀：`0394-6728150`（6-8 位纯数字且前邻 3-4 位区号）
      */
+    private val NOISE_PREFIX_BEFORE = Regex("(?:验证码|动态码|校验码|交易时间|下单时间|时间)\\s*[:：]?\\s*(?:为|是)?\\s*(?:[A-Za-z0-9]{1,3}-)?$")
+    private val SMS_GATEWAY_SHORTCODE = Regex("^106\\d{5,10}$")
+
     private fun hasAdjacentNoise(line: String, match: MatchResult): Boolean {
         val code = match.value
         val after = line.getOrNull(match.range.last + 1)
         if (after == '%' || after == '*') return true
         if (after == ':' && code.length <= 8) return true
+        val before = line.substring(0, match.range.first)
+        if (NOISE_PREFIX_BEFORE.containsMatchIn(before)) return true
+        if (SMS_GATEWAY_SHORTCODE.matches(code)) return true
         if (match.range.first >= 3 && line.substring(match.range.first - 3, match.range.first) == "GB/") return true
         if (code.length in 6..8 && code.all { it.isDigit() } &&
-            AREA_CODE_BEFORE.containsMatchIn(line.substring(0, match.range.first))) return true
+            AREA_CODE_BEFORE.containsMatchIn(before)) return true
         return false
     }
 

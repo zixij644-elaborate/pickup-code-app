@@ -134,7 +134,7 @@ class CorpusHarnessActivity : Activity() {
             val globalAddr = AddressExtractor.extractAddressFromStores(this, lines, allText)
             val cabinet = AddressExtractor.extractCabinetNumber(lines, allText)
             val sensitive = SensitivePageGuard.isIdentityCodePage(allText)
-            val financial = CodeExtractor.isFinancialNoise(allText)
+            val financial = false
             val multiCode = results.distinctBy { "${it.code}|${it.type}" }.size > 1
             val savedMatch = SavedAddressMatcher.match(lines, savedViews)
             val fallback = AddressExtractor.resolveAddress(lines, allText, "", globalAddr, multiCode)
