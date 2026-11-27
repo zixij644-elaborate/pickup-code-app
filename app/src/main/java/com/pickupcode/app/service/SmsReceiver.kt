@@ -79,6 +79,10 @@ class SmsReceiver : BroadcastReceiver() {
                     if (lines.isEmpty()) return@withTimeoutOrNull
 
                     val allText = lines.joinToString(" ") { it.text }
+                    if (com.pickupcode.app.util.SensitivePageGuard.isIdentityCodePage(allText)) {
+                        Log.w(TAG, "短信含身份码/出库码特征，跳过识别")
+                        return@withTimeoutOrNull
+                    }
                     val startMs = System.currentTimeMillis()
                     val results = CodeExtractor.extract(lines, context = context, source = "sms")
                     // 逐类型过滤：用户单独关闭「取餐码」/「取件码」时，该类型短信不得入库+通知

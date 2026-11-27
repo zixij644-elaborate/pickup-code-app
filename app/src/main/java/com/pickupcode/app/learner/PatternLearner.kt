@@ -659,6 +659,8 @@ object PatternLearner {
             for (s in suggestions) {
                 if (s.count < minCount || s.confidence < minConfidence) continue
                 if (s.proposedRegex in existingRegexes) continue
+                // 内置规则已覆盖的形状不再自动学出重复规则（防 6-8 位纯数字被学成 pickup_food 触发双类型冲突）
+                if (s.sampleCodes.any { com.pickupcode.app.extractor.CodeExtractor.builtinCovers(it, context) }) continue
 
                 // 加固：拒绝过度泛化的 token —— 含 'X'(任意字符) 的 token 会生成匹配任何文本的规则，
                 // 极易误报（如 X-d4 会匹配 "A-1234" 也会匹配 "啊-1234"）。只采纳由明确字符类

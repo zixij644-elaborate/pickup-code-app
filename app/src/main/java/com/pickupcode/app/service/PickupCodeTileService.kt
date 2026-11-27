@@ -112,20 +112,22 @@ class PickupCodeTileService : TileService() {
         // 用户会"点了没有任何反应"；INACTIVE 保持可点，onClick 三分支负责引导。
         val gen = ++listenGeneration
         for (delayMs in longArrayOf(0L, 1500L, 3000L)) {
-            stateExecutor.execute {
-                val ok = isEnabledInSettings() &&
-                    PickupCodeAccessibilityService.connected
-                mainHandler.postDelayed({
-                    if (gen != listenGeneration) return@postDelayed // 新一次 onStartListening 已接管，丢弃旧结果
-                    qsTile?.apply {
-                        val target = if (ok) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-                        if (state != target) {
-                            state = target
-                            updateTile()
+            mainHandler.postDelayed({
+                if (gen != listenGeneration) return@postDelayed // 新一次 onStartListening 已接管，丢弃旧结果
+                stateExecutor.execute {
+                    val ok = isEnabledInSettings() && PickupCodeAccessibilityService.connected
+                    mainHandler.post {
+                        if (gen != listenGeneration) return@post
+                        qsTile?.apply {
+                            val target = if (ok) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+                            if (state != target) {
+                                state = target
+                                updateTile()
+                            }
                         }
                     }
-                }, delayMs)
-            }
+                }
+            }, delayMs)
         }
     }
 

@@ -61,21 +61,28 @@ object SavedAddressStore {
     // ---- 进程内缓存：识别热路径只读这里，避免每次识别都做 Keystore 解密 ----
     @Volatile private var cache: List<SavedAddress>? = null
     @Volatile private var ignoredCache: Set<String>? = null
+    @Volatile private var loadFailed = false
 
     @Synchronized
     fun getAll(context: Context): List<SavedAddress> {
         cache?.let { return it }
         val raw = prefs(context).getString(KEY_LIST, null)
-            ?: return emptyList<SavedAddress>().also { cache = it }
-        val list = try {
+            ?: return emptyList<SavedAddress>().also { loadFailed = false; cache = it }
+        return try {
             val json = SecretCipher.decrypt(raw, "常用取件地址")
-            if (json.isBlank()) emptyList() else parseList(json)
+            if (json.isBlank()) {
+                // 非空密文解密返回空串：密钥暂不可用，不缓存空列表、后续拒绝覆写原数据
+                loadFailed = SecretCipher.isEncrypted(raw)
+                emptyList<SavedAddress>().also { if (!loadFailed) cache = it }
+            } else {
+                loadFailed = false
+                parseList(json).also { cache = it }
+            }
         } catch (e: Exception) {
+            loadFailed = true
             Log.w(TAG, "常用地址解析失败，按空处理（原数据保留）", e)
             emptyList()
         }
-        cache = list
-        return list
     }
 
     /** 供识别管线使用的纯数据（只含 enabled 项）。 */
@@ -86,11 +93,15 @@ object SavedAddressStore {
     fun upsert(context: Context, item: SavedAddress) {
         val fullName = item.fullName.trim()
         if (fullName.isBlank()) return                      // 完整名称必填
+        val cur = getAll(context).toMutableList()
+        if (loadFailed) {
+            Log.w(TAG, "原有常用地址解密失败，拒绝用单条写入覆盖原数据")
+            return
+        }
         val cleaned = item.copy(
             fullName = fullName,
             keywords = item.keywords.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         )
-        val cur = getAll(context).toMutableList()
         val idx = cur.indexOfFirst { it.id == cleaned.id }
         if (idx >= 0) cur[idx] = cleaned else cur.add(0, cleaned)
         persist(context, cur.sortedByDescending { it.createdAt }.take(MAX_ENTRIES))

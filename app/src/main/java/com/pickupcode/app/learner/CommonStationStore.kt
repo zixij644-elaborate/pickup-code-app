@@ -36,6 +36,11 @@ object CommonStationStore {
         return json
     }
 
+    private fun hasUnreadableEncrypted(context: Context, prefsName: String, key: String): Boolean {
+        val stored = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).getString(key, null) ?: return false
+        return SecretCipher.isEncrypted(stored) && SecretCipher.decrypt(stored, "常用取件点").isBlank()
+    }
+
     private fun writeJson(context: Context, prefsName: String, key: String, json: String) {
         try {
             val encrypted = SecretCipher.encrypt(json, "常用取件点")
@@ -79,6 +84,7 @@ object CommonStationStore {
         val name = extractStationName(address.ifBlank { rawText }) ?: return
         // 用户手动删掉过的站点/地址不要再学回来（否则"删了还在"让人以为删除没生效）。
         if (SavedAddressStore.isIgnored(context, name)) return
+        if (hasUnreadableEncrypted(context, PREFS, KEY_STATIONS)) return
         val cur = loadInternal(context)
         val next = LinkedHashMap<String, Int>()
         // 保留出现次数 >1 的既有条目 + 本次 +1
@@ -156,6 +162,7 @@ object CommonStationStore {
     @Synchronized
     fun registerPickupPoint(context: Context, address: String) {
         if (address.isBlank()) return
+        if (hasUnreadableEncrypted(context, PICKUP_PREFS, KEY_PICKUP_POINTS)) return
         val key = address.trim()
         val json = readJson(context, PICKUP_PREFS, KEY_PICKUP_POINTS)
         val map = linkedMapOf<String, PickupPoint>()
@@ -181,6 +188,7 @@ object CommonStationStore {
     /** 该地址是否已是常用取件点（出现 >= 2 次）。返回 null 表示不是。 */
     fun isFrequentPickupPoint(context: Context, address: String): PickupPoint? {
         if (address.isBlank()) return null
+        if (hasUnreadableEncrypted(context, PICKUP_PREFS, KEY_PICKUP_POINTS)) return null
         val json = readJson(context, PICKUP_PREFS, KEY_PICKUP_POINTS) ?: return null
         return try {
             val arr = JSONArray(json)

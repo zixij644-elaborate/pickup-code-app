@@ -102,7 +102,7 @@ object GeocoderVerifier {
             }
 
             val formatted = buildString {
-                for (i in 0 until best.maxAddressLineIndex.coerceAtMost(2)) {
+                for (i in 0..best.maxAddressLineIndex.coerceAtMost(2)) {
                     if (i > 0) append(", ")
                     append(best.getAddressLine(i))
                 }

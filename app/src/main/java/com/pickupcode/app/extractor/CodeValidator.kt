@@ -156,9 +156,9 @@ object CodeValidator {
         return if (shortFood) !isContentNoise(c) else isValidPickupCode(c)
     }
 
-    internal fun isExcluded(code: String, context: Context? = null) =
+    internal fun isExcluded(code: String, context: Context? = null, allowCustomFormat: Boolean = false) =
         EXCLUDE_PATTERNS.any { it.containsMatchIn(code) } ||
-        !isValidPickupCode(code) ||
+        (if (allowCustomFormat) isContentNoise(code) else !isValidPickupCode(code)) ||
         // A3: 用户标记"不是取件码"的可学习排除片段
         PatternLearner.isLearnedExcluded(code, context)
 

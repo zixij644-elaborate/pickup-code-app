@@ -37,6 +37,8 @@ class RemindReceiver : BroadcastReceiver() {
                     // 残留闹钟罕见），也不让提醒静默丢失。
                     val activeCount = try {
                         repo.countActiveByCodeAndType(code, type.name)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.w("RemindReceiver", "直启引导阶段 DB 不可用，按未知处理", e)
                         -1
@@ -45,6 +47,10 @@ class RemindReceiver : BroadcastReceiver() {
                         CodeNotificationManager.showReminder(context, code, type, source, kind)
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RemindReceiver", "提醒处理失败: ${e.message}", e)
             } finally {
                 pendingResult.finish()
                 scope.cancel()

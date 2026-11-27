@@ -288,51 +288,54 @@ object ShareReceiver {
         var lines: List<OCREngine.TextLine> = emptyList()
         var coupons: List<CouponDetector.CouponResult> = emptyList()
         var ocrError = false
-        withContext(Dispatchers.Default) {
-            try {
-                lines = OCREngine.recognize(bitmap)
-                coupons = CouponDetector.detect(bitmap)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "OCR failed", e)
-                ocrError = true
+        try {
+            withContext(Dispatchers.Default) {
+                try {
+                    lines = OCREngine.recognize(bitmap)
+                    coupons = CouponDetector.detect(bitmap)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "OCR failed", e)
+                    ocrError = true
+                }
             }
-        }
-        if ((lines.isEmpty() && coupons.isEmpty()) || ocrError) {
-            // 识别无结果时不落盘截图：先识别后存图，避免空结果也产生孤儿 JPEG
-            // （与无障碍路径「识别成功后才保存」行为一致）
-            if (!bitmap.isRecycled) bitmap.recycle()
-            if (lines.isEmpty() && coupons.isEmpty()) {
-                Log.w(TAG, "分享图片识别无结果——OCR和条码检测均未返回内容")
+            if ((lines.isEmpty() && coupons.isEmpty()) || ocrError) {
+                if (lines.isEmpty() && coupons.isEmpty()) {
+                    Log.w(TAG, "分享图片识别无结果——OCR和条码检测均未返回内容")
+                }
+                return
             }
-            return
-        }
 
-        // AI 图片通道：必须在 recycle 之前把图压成 base64（用户要求「发给 AI 的是照片」）。
-        // 只有 AI 已启用且「AI 读取图片」开着时才压，避免白耗 CPU。
-        val aiImage: String? = run {
-            val st = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }
-            if (st.enableAI && st.enableAiImage) {
-                withContext(Dispatchers.IO) { ImageUtils.toBase64JpegForAi(bitmap) }
-            } else {
-                null
+            val allText = lines.joinToString(" ") { it.text }
+            // 🔒 身份码/出库码页面：在发给 AI 和落盘截图之前就拦截，绝不外发也不落盘
+            if (com.pickupcode.app.util.SensitivePageGuard.isIdentityCodePage(allText)) {
+                Log.w(TAG, "身份码/出库码页面，拒绝识别与存图")
+                return
             }
-        }
 
-        // 识别到结果才保存共享图片（详情页截图用）
-        val screenshotPath = try {
-            withContext(Dispatchers.IO) {
+            // AI 图片通道：必须在 recycle 之前把图压成 base64（用户要求「发给 AI 的是照片」）。
+            // 只有 AI 已启用且「AI 读取图片」开着时才压，避免白耗 CPU。
+            val aiImage: String? = run {
+                val st = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }
+                if (st.enableAI && st.enableAiImage) {
+                    withContext(Dispatchers.IO) { ImageUtils.toBase64JpegForAi(bitmap) }
+                } else {
+                    null
+                }
+            }
+
+            // 识别到结果才保存共享图片（详情页截图用）
+            val screenshotPath = withContext(Dispatchers.IO) {
                 ImageUtils.saveJpeg(context, "shared_images", "share", bitmap)
             }
+
+            val address = AddressExtractor.extractAddressFromStores(context, lines, allText)
+            val snippet = "$sourceLabel | ${lines.joinToString(" ") { it.text }}"
+            extractAndNotify(context, lines, snippet, screenshotPath, address, scope, coupons, shareSource, aiImage)
         } finally {
             if (!bitmap.isRecycled) bitmap.recycle()
         }
-
-        val allText = lines.joinToString(" ") { it.text }
-        val address = AddressExtractor.extractAddressFromStores(context, lines, allText)
-        val snippet = "$sourceLabel | ${lines.joinToString(" ") { it.text }}"
-        extractAndNotify(context, lines, snippet, screenshotPath, address, scope, coupons, shareSource, aiImage)
     }
 
     private suspend fun extractAndNotify(
@@ -349,6 +352,10 @@ object ShareReceiver {
         val shareSourcePkg = shareSource?.pkg ?: ""
         val shareSourceName = shareSource?.name ?: ""
         val allText = lines.joinToString(" ") { it.text }
+        if (com.pickupcode.app.util.SensitivePageGuard.isIdentityCodePage(allText)) {
+            Log.w(TAG, "身份码/出库码页面，拒绝识别")
+            return
+        }
 
         val db = AppDatabase.getInstance(context)
         val settings = withContext(Dispatchers.IO) { AppPreferences.observe(context).first() }

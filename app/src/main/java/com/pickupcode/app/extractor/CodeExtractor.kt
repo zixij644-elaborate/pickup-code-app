@@ -510,7 +510,7 @@ object CodeExtractor {
             for (rule in rules) {
                 rule.regex.findAll(line.text).forEach matchLoop@{ m ->
                     if (hasAdjacentNoise(line.text, m)) return@matchLoop
-                    if (isExcluded(m.value, context)) {
+                    if (isExcluded(m.value, context, allowCustomFormat = rule.isLearned)) {
                         // 诊断：被自学习排除词命中时单独提示（普通排除原因不逐条打，避免刷屏）
                         if (context != null && PatternLearner.isLearnedExcluded(m.value, context)) {
                             android.util.Log.d("LearnedDiag", "候选 ${m.value} 被自学习排除词命中剔除（规则 ${rule.regex.pattern}）")
