@@ -242,4 +242,18 @@ class MultiCodeAddressTest {
         assertTrue(AddressExtractor.extractAddressForCode(lines, "3-4-4352", codes).contains("育新路北段爱玛电动车旁边"))
         assertTrue(AddressExtractor.extractAddressForCode(lines, "3-2-8519", codes).contains("育新路北段爱玛电动车旁边"))
     }
+
+    @Test
+    @DisplayName("真机回归：OCR把「中通快递」误读为「中通块递79162247253762」时，不得当成53762的地址")
+    fun patternB_ocrMisreadTrackingLine_notPickedAsAddress() {
+        val lines = listOf(
+            line("菜鸟驿站", 672, 24, 92, 22),
+            line("料院悠学里三楼取一楼奇中通快递", 708, 24, 304, 19),
+            line("电话", 707, 524, 37, 18),
+            line("取件出示快递单号后五位", 776, 117, 326, 27),
+            line("53762", 816, 117, 85, 28),
+            line("中通块递79162247253762", 859, 118, 283, 22)
+        )
+        assertEquals("料院悠学里三楼取一楼奇中通快递", AddressExtractor.extractAddressForCode(lines, "53762", listOf("53762")))
+    }
 }
