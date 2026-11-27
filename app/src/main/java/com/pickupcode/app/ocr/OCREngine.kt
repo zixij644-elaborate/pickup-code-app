@@ -60,6 +60,76 @@ object OCREngine {
         }
     }
 
+    /**
+     * 将 OCR 行按屏幕视觉阅读顺序重排：
+     * 1. 无任何坐标（短信/纯文本）时原样返回，保持天然行序；
+     * 2. 有坐标时先按 centerY 升序初排，再将同一水平行带（纵向中心差 ≤ 行高×0.55 且水平不重叠）
+     *    聚为同一行带、带内按 left 从左到右排列，消除 ML Kit textBlocks 分块乱序。
+     * 采用确定性分带排序而非非传递 Comparator，避免 TimSort 在长列表上抛契约异常。
+     */
+    fun sortReadingOrder(lines: List<TextLine>): List<TextLine> {
+        if (lines.size <= 1 || lines.none { it.boundingBox != null }) return lines
+        val withBox = ArrayList<TextLine>(lines.size)
+        val withoutBox = ArrayList<TextLine>()
+        for (l in lines) {
+            if (l.boundingBox != null) withBox.add(l) else withoutBox.add(l)
+        }
+        if (withBox.size <= 1) return lines
+
+        withBox.sortWith(
+            compareBy<TextLine> { it.boundingBox!!.centerY() }
+                .thenBy { it.boundingBox!!.left }
+                .thenBy { it.boundingBox!!.top }
+        )
+
+        class RowBand(first: TextLine) {
+            val items = mutableListOf(first)
+            var sumCenterY = first.boundingBox!!.centerY().toLong()
+            var minHeight = first.boundingBox!!.height().coerceAtLeast(1)
+            val avgCenterY: Int get() = (sumCenterY / items.size).toInt()
+        }
+
+        val bands = mutableListOf<RowBand>()
+        for (line in withBox) {
+            val box = line.boundingBox!!
+            val cy = box.centerY()
+            val h = box.height().coerceAtLeast(1)
+            // 在最近的若干行带中查找可归入的水平行带（容忍左右两列轻微 Y 偏移，拒绝水平重叠的上下两行）
+            var matched: RowBand? = null
+            for (idx in bands.lastIndex downTo maxOf(0, bands.lastIndex - 3)) {
+                val b = bands[idx]
+                val tol = (minOf(b.minHeight, h) * 0.55f).coerceAtLeast(12f)
+                if (kotlin.math.abs(cy - b.avgCenterY) <= tol) {
+                    val overlapsX = b.items.any { existing ->
+                        val eb = existing.boundingBox!!
+                        val overlap = minOf(eb.right, box.right) - maxOf(eb.left, box.left)
+                        overlap > minOf(eb.width(), box.width()) * 0.35f
+                    }
+                    if (!overlapsX) {
+                        matched = b
+                        break
+                    }
+                }
+            }
+            if (matched != null) {
+                matched.items.add(line)
+                matched.sumCenterY += cy
+                if (h < matched.minHeight) matched.minHeight = h
+            } else {
+                bands.add(RowBand(line))
+            }
+        }
+
+        bands.sortBy { it.avgCenterY }
+        val sorted = ArrayList<TextLine>(lines.size)
+        for (b in bands) {
+            b.items.sortBy { it.boundingBox!!.left }
+            sorted.addAll(b.items)
+        }
+        sorted.addAll(withoutBox)
+        return sorted
+    }
+
     private suspend fun doRecognize(bitmap: Bitmap): List<TextLine> {
         try {
             val image = InputImage.fromBitmap(bitmap, 0)
@@ -77,7 +147,7 @@ object OCREngine {
                     )
                 }
             }
-            return out
+            return sortReadingOrder(out)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

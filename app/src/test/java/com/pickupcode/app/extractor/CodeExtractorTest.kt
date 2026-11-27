@@ -389,6 +389,37 @@ class CodeExtractorTest {
     }
 
     @Test
+    @DisplayName("运单尾号即唯一凭证：取件请出示运单号后五位 80747 → 80747 入库")
+    fun trackingSuffix_onlyCredential() {
+        // 真实截图 Screenshot_20260908_141443：通知里没有任何常规取件码，
+        // 80747 正是 14 位运单号 76975390580747 的后五位。
+        val r = CodeExtractor.extract(listOf(
+            line("中通快递 76975390580747"),
+            line("待取件"),
+            line("科院悠学里三楼取一楼寄中通快递"),
+            line("取件请出示运单号后五位： 80747"),
+            line("快件已送达【菜鸟-科院悠学里三楼取一楼寄中通快递")
+        ))
+        val codes = r.map { it.code }
+        assertTrue(codes.contains("80747"), "运单尾号唯一凭证应入库: $codes")
+        assertTrue(codes.none { it == "76975390580747" }, "完整运单号不是取件码: $codes")
+        assertEquals(CodeExtractor.CodeType.pickup_parcel, r.first { it.code == "80747" }.type)
+    }
+
+    @Test
+    @DisplayName("已有常规取件码时，核对用的运单尾号不重复提取")
+    fun trackingSuffix_notExtractedWhenCodeExists() {
+        // 真实截图 mmexport1785505903538：「凭1-6-5020到…取运单尾号9077包裹」——
+        // 9077 是核对信息，不是第二个码。
+        val r = CodeExtractor.extract(listOf(
+            line("【圆通快递】凭1-6-5020到韩梅诊所对面菜鸟取运单尾号9077包裹")
+        ))
+        val codes = r.map { it.code }
+        assertTrue(codes.contains("1-6-5020"), "常规取件码应识别: $codes")
+        assertTrue(codes.none { it == "9077" }, "核对用尾号不应被当成取件码: $codes")
+    }
+
+    @Test
     @DisplayName("字母+数字取餐码不允许内部空格（A 12 不再被当成 A 12 入码）")
     fun foodLetterNum_noInnerSpace() {
         val r = CodeExtractor.extract(listOf(line("瑞幸咖啡"), line("取餐码 A 12")))

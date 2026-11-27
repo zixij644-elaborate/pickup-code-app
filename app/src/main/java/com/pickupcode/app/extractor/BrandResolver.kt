@@ -281,4 +281,10 @@ object BrandResolver {
      */
     fun findOrderNumber(allText: String): String? =
         COURIER_ORDER_NUM.find(allText)?.value
+
+    /**
+     * 公开：提取文本中所有不重复的运单/快递单号（多码同框逐单反查用）。
+     */
+    fun findAllOrderNumbers(allText: String): List<String> =
+        COURIER_ORDER_NUM.findAll(allText).map { it.value }.distinct().toList()
 }

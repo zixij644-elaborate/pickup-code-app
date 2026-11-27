@@ -65,6 +65,19 @@ object CodeExtractor {
     private val JOINED_PREFIX_CODE = Regex("^[餐件货单]码[A-Za-z0-9].*")
     // OCR 把段间分隔符"-"读成中文"一"（如 取件码:3一1-1099）——仅当"一"夹在数字之间时还原为"-"
     private val DASH_LIKE_OCR_REGEX = Regex("(?<=\\d)一(?=\\d)")
+    /** 运单/快递单尾号即唯一取件凭证（真实截图 Screenshot_20260908_141443 / IMG_20261127_124935）：
+     *  「取件请出示运单号后五位：80747」或跨两行的「取件出示快递单号后五位 \n 53762」。
+     *  必须同时出现"取件/取货/领取"与"出示"，否则「凭1-6-5020…取运单尾号9077包裹」这种
+     *  （已有常规码、尾号仅用于核对）会被重复提取成第二个码。第 1 组捕获尾号本身。 */
+    internal val TRACKING_SUFFIX_CREDENTIAL = Regex(
+        "(?:取件|取货|领取)[^。；;\\n]{0,12}出示[^0-9]{0,8}(?:运单|快递单|快件单)?号?\\s*后\\s*[0-9一二三四五六七八九]\\s*位\\s*[:：]?\\s*(\\d{4,6})"
+    )
+    /** 尾号凭证标签独占一行、纯数字尾号在正下方相邻行（如拼多多取快递页「取件出示快递单号后五位」换行「53762」）。 */
+    private val TRACKING_SUFFIX_LABEL_ONLY = Regex(
+        "(?:取件|取货|领取)[^。；;\\n]{0,12}出示[^0-9]{0,8}(?:运单|快递单|快件单)?号?\\s*后\\s*([0-9一二三四五六七八九])\\s*位\\s*[:：]?\\s*$"
+    )
+    private val WHOLE_LINE_DIGITS_CREDENTIAL = Regex("^(\\d{4,6})$")
+
     // 上下文邻接噪声（真机日志对照分析新增）：码值紧邻的字符暗示这不是取件码
     private val AREA_CODE_BEFORE = Regex("\\d{3,4}-$")
     private val NEXT_LINE_UI_NOISE = Regex("订单|详情|查看物流|查看更多|评价|确认收货|申请售后|待收货|待发货|待付款")
@@ -418,6 +431,27 @@ object CodeExtractor {
             }
         }
 
+        // 运单/快递单尾号即唯一取件凭证（单行或标签正下方换行）：没有常规取件码时，
+        // 「取件请出示运单号后五位：80747」或「取件出示快递单号后五位 \n 53762」按取件码入库。
+        for ((idx, line) in lines.withIndex()) {
+            val m = TRACKING_SUFFIX_CREDENTIAL.find(line.text)
+            val code = if (m != null) {
+                m.groupValues[1].trim()
+            } else if (TRACKING_SUFFIX_LABEL_ONLY.containsMatchIn(line.text.trim())) {
+                nearestDigitsCredentialBelow(lines, idx) ?: continue
+            } else {
+                continue
+            }
+            if (!isValidStrongContextCode(code)) continue
+            candidates.add(Candidate(
+                code,
+                CodeType.pickup_parcel,
+                SCORE_PREFIXED,
+                sourceFromLine(line, "取件码", lines, allText),
+                strong = true
+            ))
+        }
+
         // 标签行 + **竖直正下方**的码（2026-09-16 真实语料回归新增）：
         // OCR 行数组顺序不可靠——地图/浮层标签会插进标签与码值之间，"数组下一行"规则会漏掉真实码。
         // 真机案例：美团外卖配送页「取餐号」在 y=803，唯一真实码 QTP07 在 y=843，而中间隔了 4 个数组下标。
@@ -739,6 +773,46 @@ object CodeExtractor {
             if (cur == null || b.top < (cur.boundingBox?.top ?: Int.MAX_VALUE)) best = l
         }
         return best?.text?.trim()?.let { WHOLE_LINE_CODE.find(it)?.groupValues?.get(1) }
+    }
+
+    /**
+     * 取「取件出示快递单号后五位」标签行正下方的整行 4~6 位纯数字凭证。
+     * 有坐标时按几何正下方最近行查找（防 ML Kit 分块乱序），无坐标时回退到紧邻下一行。
+     */
+    private fun nearestDigitsCredentialBelow(lines: List<OCREngine.TextLine>, labelIdx: Int): String? {
+        val labelLine = lines.getOrNull(labelIdx) ?: return null
+        val expectedLen = TRACKING_SUFFIX_LABEL_ONLY.find(labelLine.text.trim())
+            ?.groupValues?.getOrNull(1)?.let { digitCountFromToken(it) }
+        fun matchesLen(d: String): Boolean = expectedLen == null || d.length == expectedLen
+
+        val labelBox = labelLine.boundingBox
+        if (labelBox != null) {
+            val maxGap = maxOf(labelBox.height() * LABEL_GAP_LINES, LABEL_GAP_MIN_PX)
+            var best: OCREngine.TextLine? = null
+            for ((j, l) in lines.withIndex()) {
+                if (j == labelIdx) continue
+                val b = l.boundingBox ?: continue
+                val gap = b.top - labelBox.bottom
+                if (gap < -6 || gap > maxGap) continue
+                val m = WHOLE_LINE_DIGITS_CREDENTIAL.find(l.text.trim()) ?: continue
+                if (!matchesLen(m.groupValues[1])) continue
+                val cur = best
+                if (cur == null || b.top < (cur.boundingBox?.top ?: Int.MAX_VALUE)) best = l
+            }
+            if (best != null) {
+                return WHOLE_LINE_DIGITS_CREDENTIAL.find(best.text.trim())?.groupValues?.get(1)
+            }
+        }
+        val nextTxt = lines.getOrNull(labelIdx + 1)?.text?.trim() ?: return null
+        val m = WHOLE_LINE_DIGITS_CREDENTIAL.find(nextTxt) ?: return null
+        return m.groupValues[1].takeIf { matchesLen(it) }
+    }
+
+    private fun digitCountFromToken(token: String): Int? = when (token) {
+        "4", "四" -> 4
+        "5", "五" -> 5
+        "6", "六" -> 6
+        else -> null
     }
 
     private fun posBonus(line: OCREngine.TextLine, screenHeight: Int): Float {
