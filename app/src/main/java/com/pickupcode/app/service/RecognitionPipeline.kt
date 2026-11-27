@@ -14,6 +14,7 @@ import com.pickupcode.app.ocr.OCREngine
 import com.pickupcode.app.preferences.AppPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -204,4 +205,83 @@ object RecognitionPipeline {
         CodeExtractor.CodeType.coupon -> settings.enableCouponCodes
     }
 
+    /**
+     * 合并 AI 提取结果（三路径共用）：记录 code→地址/柜号提示（key 统一大写），并按类型开关与大小写去重后追加到 [allResults]。
+     */
+    fun mergeAiResults(
+        aiResults: List<com.pickupcode.app.extractor.AIExtractor.AIResult>,
+        settings: AppPreferences.Settings,
+        allResults: MutableList<Pair<String, CodeExtractor.CodeType>>,
+        codeSources: MutableMap<String, String>,
+        aiAddressHints: MutableMap<String, String>,
+        aiCabinetHints: MutableMap<String, String>
+    ) {
+        for (ai in aiResults) {
+            val codeKey = ai.code.uppercase()
+            ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[codeKey] = it }
+            ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[codeKey] = it }
+            if (!isTypeEnabled(ai.type, settings)) continue
+            if (allResults.any { it.first.equals(ai.code, ignoreCase = true) && it.second == ai.type }) continue
+            allResults.add(ai.code to ai.type)
+            codeSources.putIfAbsent(ai.code, ai.source)
+        }
+    }
+
+    /**
+     * 识别后置异步验证（无障碍 & 分享共用）：地图地理编码校验 + 快递100 多运单号反查定向补全地址。
+     */
+    fun runPostVerifiers(
+        context: Context,
+        scope: kotlinx.coroutines.CoroutineScope,
+        settings: AppPreferences.Settings,
+        saved: List<SavedCode>,
+        allText: String,
+        allResults: List<Pair<String, CodeExtractor.CodeType>>,
+        repo: CodeRepository,
+        onGeoVerified: ((address: String, confidence: Float) -> Unit)? = null
+    ) {
+        if (settings.enableMapVerify) {
+            val amapKey = settings.amapApiKey.ifBlank { null }
+            for (record in saved.filter { it.address.isNotBlank() }) {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        PostVerifier.verifyMap(context, record.address, amapKey) { conf, fmtAddr ->
+                            onGeoVerified?.invoke(record.address, conf)
+                            repo.updateGeo(record.id, true, conf, fmtAddr ?: "")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RecognitionPipeline", "Geo verify error: ${e.message}")
+                    }
+                }
+            }
+        }
+        if (settings.enableKuaidi100 && settings.kuaidi100Key.isNotBlank()) {
+            val trackingNums = com.pickupcode.app.extractor.BrandResolver.findAllOrderNumbers(allText)
+            if (trackingNums.isNotEmpty()) {
+                val savedIdsByCode = saved.associate { it.code to it.id }
+                val ocrCodes = allResults.map { it.first }
+                scope.launch(Dispatchers.IO) {
+                    for (trackingNum in trackingNums) {
+                        try {
+                            val res = PostVerifier.verifyKuaidi100(context, settings.kuaidi100Key, trackingNum, ocrCodes)
+                                ?: continue
+                            val pCode = res.pickUpCode ?: continue
+                            val pAddr = res.pickUpAddress?.takeIf { it.isNotBlank() } ?: continue
+                            val targetId = savedIdsByCode[pCode]
+                            if (targetId != null) {
+                                repo.getByIdSuspend(targetId)?.let { rec ->
+                                    if (rec.pickupAddress.isBlank()) repo.updatePickupAddress(targetId, pAddr)
+                                }
+                            } else {
+                                val rec = repo.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
+                                if (rec != null && rec.pickupAddress.isBlank()) repo.updatePickupAddress(rec.id, pAddr)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("RecognitionPipeline", "Kuaidi100 verify error: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

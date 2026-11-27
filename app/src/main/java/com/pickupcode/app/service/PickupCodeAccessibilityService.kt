@@ -576,11 +576,24 @@ class PickupCodeAccessibilityService : AccessibilityService() {
             )
         }
 
-        // 地图地址验证（finalize 之后才有 id，写回 geo 字段与分享路径一致）
-        verifyMapAddress(settings, saved)
-
-        // ⑦ 快递100 验证：识别到取件码时，用运单号反查取件码/地址作为标准答案，对照 OCR 结果（fire-and-forget）
-        verifyWithKuaidi100(settings, allText, address, allResults)
+        // ⑦ 后置异步验证：地图地理编码 + 快递100 多运单号反查
+        val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
+        RecognitionPipeline.runPostVerifiers(
+            context = this@PickupCodeAccessibilityService,
+            scope = scope,
+            settings = settings,
+            saved = saved,
+            allText = allText,
+            allResults = allResults,
+            repo = repo,
+            onGeoVerified = { addr, conf ->
+                try {
+                    PatternLearner.recordAddressVerified(this@PickupCodeAccessibilityService, addr, conf)
+                } catch (e: Exception) {
+                    Log.w(TAG, "recordAddressVerified failed: ${e.message}")
+                }
+            }
+        )
     }
 
     /** ① 券码：解码内容加入 allResults；返回 true 表示存在券码（互斥标志）。 */
@@ -679,16 +692,9 @@ class PickupCodeAccessibilityService : AccessibilityService() {
                     Log.w(TAG, "AI 识别失败: ${aiRes.error}")
                 }
                 Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（图片通道=${aiRes.usedImage}）")
-                for (ai in aiRes.results) {
-                    // AI 给出的地址/柜号：先登记（即使该码已被正则识别，也能用来补空地址）
-                    ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code.uppercase()] = it }
-                    ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code.uppercase()] = it }
-                    if (!isTypeEnabled(ai.type, settings)) continue
-                    val alreadySame = allResults.any { it.first.equals(ai.code, ignoreCase = true) && it.second == ai.type }
-                    if (alreadySame) continue
-                    allResults.add(ai.code to ai.type)
-                    codeSources.putIfAbsent(ai.code, ai.source)
-                }
+                RecognitionPipeline.mergeAiResults(
+                    aiRes.results, settings, allResults, codeSources, aiAddressHints, aiCabinetHints
+                )
             } catch (e: Exception) {
                 // Low-1: 协程取消异常必须向上传播，不能被吞掉
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -697,27 +703,6 @@ class PickupCodeAccessibilityService : AccessibilityService() {
             }
         }
         return aiErr
-    }
-
-    /** 地图地址验证（async, fire-and-forget）：学习 + 定向写回 geo 字段（与分享路径一致）。 */
-    private fun verifyMapAddress(settings: AppPreferences.Settings, saved: List<RecognitionPipeline.SavedCode>) {
-        if (settings.enableMapVerify) {
-            for (record in saved.filter { it.address.isNotBlank() }) scope.launch {
-                PostVerifier.verifyMap(this@PickupCodeAccessibilityService, record.address, settings.amapApiKey.ifBlank { null }) { conf, fmtAddr ->
-                    try {
-                        PatternLearner.recordAddressVerified(this@PickupCodeAccessibilityService, record.address, conf)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "recordAddressVerified failed: ${e.message}")
-                    }
-                    try {
-                        val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
-                        repo.updateGeo(record.id, true, conf, fmtAddr ?: "")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "updateGeo failed: ${e.message}")
-                    }
-                }
-            }
-        }
     }
 
     /** ⑤ 无结果时提示（AI 失败带上原因）。返回 true 表示提前退出（后续步骤不再执行）。 */
@@ -763,33 +748,6 @@ class PickupCodeAccessibilityService : AccessibilityService() {
     private fun notifyConflicts(conflicts: List<String>, silent: Boolean) {
         if (conflicts.isNotEmpty() && !silent) {
             showResult("「${conflicts.joinToString("、")}」同时匹配取餐/取件类型，请进入App确认")
-        }
-    }
-
-    /** ⑦ 快递100 验证：识别到取件码时，用运单号反查取件码/地址作为标准答案，对照 OCR 结果（fire-and-forget）。 */
-    private fun verifyWithKuaidi100(settings: AppPreferences.Settings, allText: String, address: String,
-                                    allResults: List<Pair<String, CodeExtractor.CodeType>>) {
-        if (settings.enableKuaidi100 && settings.kuaidi100Key.isNotBlank()) {
-            val trackingNums = BrandResolver.findAllOrderNumbers(allText)
-            if (trackingNums.isNotEmpty()) {
-                scope.launch {
-                    val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
-                    for (trackingNum in trackingNums) {
-                        val res = PostVerifier.verifyKuaidi100(
-                            this@PickupCodeAccessibilityService, settings.kuaidi100Key, trackingNum,
-                            allResults.map { it.first }
-                        ) ?: continue
-                        val pCode = res.pickUpCode ?: continue
-                        // 按单条记录自身 pickupAddress 是否为空决定是否补全（多码同框互不干扰）
-                        if (!res.pickUpAddress.isNullOrBlank()) {
-                            val rec = repo.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
-                            if (rec != null && rec.pickupAddress.isBlank()) {
-                                repo.updatePickupAddress(rec.id, res.pickUpAddress)
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 

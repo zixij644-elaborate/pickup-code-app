@@ -103,12 +103,15 @@ class SmsReceiver : BroadcastReceiver() {
                         if (aiRes != null) {
                             if (aiRes.error != null) Log.w(TAG, "AI 识别失败: ${aiRes.error}")
                             Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（文本通道）")
-                            for (ai in aiRes.results) {
-                                ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
-                                ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
-                                if (!isTypeEnabled(ai.type, settings)) continue
-                                if (allResults.any { it.code.equals(ai.code, ignoreCase = true) && it.type == ai.type }) continue
-                                allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
+                            val mergedPairs = allResults.map { it.code to it.type }.toMutableList()
+                            val mergedSources = allResults.associate { it.code to it.source }.toMutableMap()
+                            val beforeSize = mergedPairs.size
+                            RecognitionPipeline.mergeAiResults(
+                                aiRes.results, settings, mergedPairs, mergedSources, aiAddressHints, aiCabinetHints
+                            )
+                            for (idx in beforeSize until mergedPairs.size) {
+                                val (c, t) = mergedPairs[idx]
+                                allResults.add(CodeExtractor.ExtractedCode(c, t, mergedSources[c] ?: "unknown", 1.0f))
                             }
                         } else {
                             Log.d(TAG, "AI 超时未返回（预算 ${budget}ms），仅用正则结果")

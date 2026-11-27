@@ -433,13 +433,15 @@ object ShareReceiver {
                     }
                     Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（图片通道=${aiRes.usedImage}）" +
                         (if (BuildConfig.DEBUG) ": " + aiRes.results.joinToString { "${it.code}(${it.type})@${it.address}" } else ""))
-                    for (ai in aiRes.results) {
-                        // AI 给出的地址/柜号：无论最终是否新增码都要登记，供管线在本地取不到时填空
-                        ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code.uppercase()] = it }
-                        ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code.uppercase()] = it }
-                        if (isTypeDisabled(ai.type, settings)) continue
-                        if (allResults.any { it.code.equals(ai.code, ignoreCase = true) && it.type == ai.type }) continue // 同码同type去重
-                        allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
+                    val mergedPairs = allResults.map { it.code to it.type }.toMutableList()
+                    val mergedSources = allResults.associate { it.code to it.source }.toMutableMap()
+                    val beforeSize = mergedPairs.size
+                    RecognitionPipeline.mergeAiResults(
+                        aiRes.results, settings, mergedPairs, mergedSources, aiAddressHints, aiCabinetHints
+                    )
+                    for (idx in beforeSize until mergedPairs.size) {
+                        val (c, t) = mergedPairs[idx]
+                        allResults.add(CodeExtractor.ExtractedCode(c, t, mergedSources[c] ?: "unknown", 1.0f))
                     }
                 } else {
                     Log.w(TAG, "AI 超时未返回（预算 ${budget}ms，图片通道=$imageMode），仅用正则结果")
@@ -486,56 +488,17 @@ object ShareReceiver {
                 s.code, s.type, s.source, s.id, s.existed)
             RecognitionPipeline.logSaved(TAG, s.code, s.type, s.source, address, s.existed)
         }
-        // Low-3: 记录本次保存的 code → id，供快递100回填定向更新，避免命中历史最新行
-        val savedIdsByCode = saved.associate { it.code to it.id }
 
-        // Async address geocoding verification（每个码）
-        if (settings.enableMapVerify) {
-            for (s in saved.filter { it.address.isNotBlank() }) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        PostVerifier.verifyMap(context, s.address, settings.amapApiKey.ifBlank { null }) { conf, fmtAddr ->
-                            db.repository.updateGeo(s.id, true, conf, fmtAddr ?: "")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Geo verify error: ${e.message}")
-                    }
-                }
-            }
-        }
-
-        // 快递100 反向验证：识别到运单号时反查取件码/地址作为标准答案（fire-and-forget，与无障碍路径一致）
-        if (settings.enableKuaidi100 && settings.kuaidi100Key.isNotBlank()) {
-            val trackingNums = BrandResolver.findAllOrderNumbers(allText)
-            if (trackingNums.isNotEmpty()) {
-                scope.launch(Dispatchers.IO) {
-                    for (trackingNum in trackingNums) {
-                        try {
-                            val res = PostVerifier.verifyKuaidi100(context, settings.kuaidi100Key, trackingNum, allResults.map { it.code })
-                                ?: continue
-                            val pCode = res.pickUpCode ?: continue
-                            if (res.pickUpAddress.isNullOrBlank().not()) {
-                                val targetId = savedIdsByCode[pCode]
-                                if (targetId != null) {
-                                    db.repository.getByIdSuspend(targetId)?.let { rec ->
-                                        if (rec.pickupAddress.isBlank()) {
-                                            db.repository.updatePickupAddress(targetId, res.pickUpAddress!!)
-                                        }
-                                    }
-                                } else {
-                                    val rec = db.repository.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
-                                    if (rec != null && rec.pickupAddress.isBlank()) {
-                                        db.repository.updatePickupAddress(rec.id, res.pickUpAddress!!)
-                                    }
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Kuaidi100 verify error: ${e.message}")
-                        }
-                    }
-                }
-            }
-        }
+        // 后置异步验证：地图地理编码 + 快递100 多运单号反查
+        RecognitionPipeline.runPostVerifiers(
+            context = context,
+            scope = scope,
+            settings = settings,
+            saved = saved,
+            allText = allText,
+            allResults = allResults.map { it.code to it.type },
+            repo = db.repository
+        )
     }
 
     /** 该类型是否被用户关闭（统一走 RecognitionPipeline，避免三份 switch 漂移） */
