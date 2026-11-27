@@ -143,10 +143,12 @@ object AIExtractor {
 - station：取件点/驿站简称（如"菜鸟驿站""兔喜生活""妈妈驿站""欢乐智柜"），没有留空
 - cabinet：柜号/格口（如"2号柜""H36"），没有留空
 
+运单尾号凭证：当通知里没有常规取件码、只写着"取件请出示运单号后五位：80747"这类要求出示运单尾号时，把该尾号数字本身作为取件码输出（code 只放数字，不要带"运单号后五位"字样）。但如果通知里已经有常规取件码（如"凭1-6-5020到韩梅诊所对面菜鸟取运单尾号9077包裹"），尾号只是核对信息，不额外输出。
+
 不要提取（这些不是取件码/取餐码）：
 - 订单号、运单号、快递单号（通常很长或紧跟在"单号""运单"后）
 - 手机号、客服电话、金额、价格、时间、日期
-- 银行/支付类验证码、"尾号"后的数字
+- 银行/支付类验证码、手机尾号（11 位手机号的后四位）
 - 优惠券/券码（本任务只识别取餐码和取件码）
 """.trimIndent()
 
@@ -244,13 +246,28 @@ object AIExtractor {
         return if (start >= 0 && end > start) cleaned.substring(start, end + 1) else cleaned
     }
 
+    /**
+     * 剥离模型偶尔带出的凭证前缀（"运单号后五位 80747"→"80747"、"尾号:6824"→"6824"）。
+     * 不加这层，带前缀的码值会被 CodeValidator.EXCLUDE_PATTERNS 里的
+     * "(?:尾号|运单号|单号|订单号)\s*[:：]?\s*\d+" 整串命中，导致"运单尾号即唯一取件凭证"的场景被误杀。
+     */
+    internal fun normalizeCode(raw: String): String {
+        var s = raw.trim()
+        s = s.replace(Regex("^.*?后\\s*[0-9一二三四五六七八九]\\s*位\\s*[:：]?\\s*"), "")
+        s = s.replace(
+            Regex("^(?:取件码|取餐码|取货码|提货码|取单码|运单号|运单|快递单号|单号|订单号|尾号)\\s*[:：]?\\s*"),
+            ""
+        )
+        return s.trim()
+    }
+
     /** 解析模型返回的 JSON 数组为 [AIResult]（含格式白名单/噪声过滤，纯函数便于单测）。 */
     internal fun parseResults(content: String): List<AIResult> {
         val arr = JSONArray(extractJsonArray(content))
         val results = mutableListOf<AIResult>()
         for (i in 0 until arr.length()) {
             val r = arr.optJSONObject(i) ?: continue
-            val code = r.optString("code", "").trim()
+            val code = normalizeCode(r.optString("code", ""))
             if (code.isBlank()) continue
             val typeStr = r.optString("type", "pickup_parcel")
             // type 解析加固：容忍模型返回 food/parcel/取餐 等变体，只有明确 food 才算取餐
@@ -324,7 +341,7 @@ object AIExtractor {
     ): AIExtractResult = withContext(Dispatchers.IO) {
         validateBaseUrl(apiBaseUrl)?.let { return@withContext AIExtractResult(error = it) }
         try {
-            val body = buildBody(model, SYSTEM_PROMPT, text, 500, isDeepSeekHost(apiBaseUrl))
+            val body = buildBody(model, SYSTEM_PROMPT, text, 1500, isDeepSeekHost(apiBaseUrl))
             val (code, resp) = postJson(body.toString(), apiKey, apiBaseUrl, TEXT_READ_TIMEOUT_MS)
             if (code != 200) {
                 return@withContext AIExtractResult(error = "HTTP $code：${resp.take(240)}")
@@ -360,7 +377,7 @@ object AIExtractor {
                 systemPrompt = SYSTEM_PROMPT,
                 userPrompt = IMAGE_USER_PROMPT,
                 imageBase64 = imageBase64,
-                maxTokens = 800,
+                maxTokens = 1500,
                 deepSeek = isDeepSeekHost(apiBaseUrl)
             )
             val (code, resp) = postJson(body.toString(), apiKey, apiBaseUrl, VISION_READ_TIMEOUT_MS)

@@ -113,7 +113,7 @@ class SmsReceiver : BroadcastReceiver() {
                                 ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
                                 ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
                                 if (!isTypeEnabled(ai.type, settings)) continue
-                                if (allResults.any { it.code == ai.code && it.type == ai.type }) continue
+                                if (allResults.any { it.code.equals(ai.code, ignoreCase = true) && it.type == ai.type }) continue
                                 allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
                             }
                         } else {

@@ -390,8 +390,9 @@ class PickupCodeAccessibilityService : AccessibilityService() {
                 val settings = AppPreferences.observe(this@PickupCodeAccessibilityService).first()
                 // 无障碍节点树遍历必须在主线程（AccessibilityNodeInfo 跨线程使用无官方保证，
                 // 部分 ROM/窗口销毁竞态下在后台线程遍历会抛异常崩进程）
-                val allText = withContext(Dispatchers.Main) { collectAllText() }
-                val lines = allText.lines().map { OCREngine.TextLine(it, null, null) }
+                val rawLines = withContext(Dispatchers.Main) { collectNodeLines() }
+                val lines = OCREngine.sortReadingOrder(rawLines)
+                val allText = lines.joinToString("\n") { it.text }
                 // 正则/提取等 CPU 密集工作在 Default 线程
                 withContext(Dispatchers.Default) {
                     tryExtract(allText, lines, null, settings, source)
@@ -406,27 +407,30 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun collectAllText(): String {
-        val root = rootInActiveWindow ?: return ""
-        val lines = collectNodeText(root)
+    private fun collectNodeLines(): List<OCREngine.TextLine> {
+        val root = rootInActiveWindow ?: return emptyList()
+        val lines = collectNodeTextLines(root)
         root.recycle()
-        return lines.joinToString("\n")
+        return lines
     }
 
-    private fun collectNodeText(node: AccessibilityNodeInfo): List<String> {
-        val lines = mutableListOf<String>()
-        if (node.text != null) {
-            node.text.toString().trim().takeIf { it.length >= 2 }?.let { lines.add(it) }
+    private fun collectNodeTextLines(node: AccessibilityNodeInfo): List<OCREngine.TextLine> {
+        val lines = mutableListOf<OCREngine.TextLine>()
+        val rect = android.graphics.Rect()
+        node.getBoundsInScreen(rect)
+        val box = if (!rect.isEmpty) OCREngine.LineBox(rect.left, rect.top, rect.right, rect.bottom) else null
+        val txt = node.text?.toString()?.trim()
+        if (!txt.isNullOrEmpty() && txt.length >= 2) {
+            lines.add(OCREngine.TextLine(txt, box, null))
         }
-        if (node.contentDescription != null) {
-            val desc = node.contentDescription.toString().trim()
-            val txt = node.text?.toString()?.trim()
-            if (desc.length >= 2 && desc != txt) lines.add(desc)
+        val desc = node.contentDescription?.toString()?.trim()
+        if (!desc.isNullOrEmpty() && desc.length >= 2 && desc != txt) {
+            lines.add(OCREngine.TextLine(desc, box, null))
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                lines.addAll(collectNodeText(child))
+                lines.addAll(collectNodeTextLines(child))
                 child.recycle()
             }
         }
@@ -531,7 +535,8 @@ class PickupCodeAccessibilityService : AccessibilityService() {
         // AI 读到的地址/柜号：code → 值，稍后交给管線在本地取不到时填空
         val aiAddressHints = mutableMapOf<String, String>()
         val aiCabinetHints = mutableMapOf<String, String>()
-        val aiDeferred = startAiExtract(allText, settings, hasCoupon, aiImage)
+        val aiText = AddressExtractor.formatTextForAi(ocrLines).ifBlank { allText }
+        val aiDeferred = startAiExtract(aiText, settings, hasCoupon, aiImage)
 
         // ③ 正则识别（无券码时运行）
         if (!hasCoupon) collectRegexResults(ocrLines, settings, allResults, codeSources)
@@ -568,6 +573,7 @@ class PickupCodeAccessibilityService : AccessibilityService() {
             screenshotPath = screenshotPath,
             aiAddressHints = aiAddressHints,
             aiCabinetHints = aiCabinetHints,
+            aiUsedImage = aiImage != null,
             repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
         )
         // 通知：同码已存在(existed) → 重复提示；否则正常通知。与短信路径统一，避免重复截图时同码常驻通知堆叠。
@@ -684,10 +690,10 @@ class PickupCodeAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "AI 返回 ${aiRes.results.size} 条（图片通道=${aiRes.usedImage}）")
                 for (ai in aiRes.results) {
                     // AI 给出的地址/柜号：先登记（即使该码已被正则识别，也能用来补空地址）
-                    ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
-                    ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
+                    ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code.uppercase()] = it }
+                    ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code.uppercase()] = it }
                     if (!isTypeEnabled(ai.type, settings)) continue
-                    val alreadySame = allResults.any { it.first == ai.code && it.second == ai.type }
+                    val alreadySame = allResults.any { it.first.equals(ai.code, ignoreCase = true) && it.second == ai.type }
                     if (alreadySame) continue
                     allResults.add(ai.code to ai.type)
                     codeSources.putIfAbsent(ai.code, ai.source)
@@ -773,20 +779,22 @@ class PickupCodeAccessibilityService : AccessibilityService() {
     private fun verifyWithKuaidi100(settings: AppPreferences.Settings, allText: String, address: String,
                                     allResults: List<Pair<String, CodeExtractor.CodeType>>) {
         if (settings.enableKuaidi100 && settings.kuaidi100Key.isNotBlank()) {
-            val trackingNum = BrandResolver.findOrderNumber(allText)
-            if (trackingNum != null) {
+            val trackingNums = BrandResolver.findAllOrderNumbers(allText)
+            if (trackingNums.isNotEmpty()) {
                 scope.launch {
-                    val res = PostVerifier.verifyKuaidi100(
-                        this@PickupCodeAccessibilityService, settings.kuaidi100Key, trackingNum,
-                        allResults.map { it.first }
-                    ) ?: return@launch
-                    val pCode = res.pickUpCode ?: return@launch
-                    // 若 OCR 未识别出地址，且 API 返回了标准地址，定向补全（不覆盖中间用户操作）
-                    if (address.isBlank() && !res.pickUpAddress.isNullOrBlank()) {
-                        val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
-                        val rec = repo.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
-                        if (rec != null && rec.pickupAddress.isBlank()) {
-                            repo.updatePickupAddress(rec.id, res.pickUpAddress)
+                    val repo = AppDatabase.getInstance(this@PickupCodeAccessibilityService).repository
+                    for (trackingNum in trackingNums) {
+                        val res = PostVerifier.verifyKuaidi100(
+                            this@PickupCodeAccessibilityService, settings.kuaidi100Key, trackingNum,
+                            allResults.map { it.first }
+                        ) ?: continue
+                        val pCode = res.pickUpCode ?: continue
+                        // 按单条记录自身 pickupAddress 是否为空决定是否补全（多码同框互不干扰）
+                        if (!res.pickUpAddress.isNullOrBlank()) {
+                            val rec = repo.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
+                            if (rec != null && rec.pickupAddress.isBlank()) {
+                                repo.updatePickupAddress(rec.id, res.pickUpAddress)
+                            }
                         }
                     }
                 }

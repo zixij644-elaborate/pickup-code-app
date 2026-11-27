@@ -125,6 +125,44 @@ class AIExtractorTest {
     }
 
     @Test
+    @DisplayName("运单尾号即唯一取件凭证：80747 能通过全部校验并入库")
+    fun parse_trackingSuffixCredential() {
+        // 场景：Screenshot_20260908_141443 —— 通知里没有常规取件码，
+        // 只有"取件请出示运单号后五位：80747"，80747 是 14 位运单号 76975390580747 的后五位。
+        val content = """[{"code":"80747","type":"pickup_parcel","source":"中通快递",
+            "address":"科院老锅炉房悠学里商场三楼取件","station":"菜鸟-科院悠学里三楼取一楼寄中通快递","cabinet":""}]"""
+        val r = AIExtractor.parseResults(content)
+        assertEquals(listOf("80747"), r.map { it.code })
+        assertEquals(CodeExtractor.CodeType.pickup_parcel, r[0].type)
+    }
+
+    @Test
+    @DisplayName("码值前缀剥离：模型带出\"运单号后五位 80747\"时仍能入库")
+    fun normalize_stripsCredentialPrefix() {
+        assertEquals("80747", AIExtractor.normalizeCode("运单号后五位 80747"))
+        assertEquals("80747", AIExtractor.normalizeCode("运单号后5位：80747"))
+        assertEquals("6824", AIExtractor.normalizeCode("尾号:6824"))
+        assertEquals("1-6-5020", AIExtractor.normalizeCode("取件码1-6-5020"))
+        assertEquals("709106", AIExtractor.normalizeCode("709106"))
+        // 不剥离时整串会被 EXCLUDE_PATTERNS 的"尾号/运单号 + 数字"命中 → 误杀
+        assertEquals(
+            listOf("80747"),
+            AIExtractor.parseResults("""[{"code":"运单号后五位 80747","type":"pickup_parcel","source":"中通快递"}]""")
+                .map { it.code }
+        )
+    }
+
+    @Test
+    @DisplayName("已有常规取件码时，核对用的运单尾号不进结果（靠提示词约束，此处锁定码值边界）")
+    fun parse_filters_trackingSuffixWhenCodeExists() {
+        // 场景：mmexport1785505903538 —— "凭1-6-5020到韩梅诊所对面菜鸟取运单尾号9077包裹"，
+        // 只有 1-6-5020 该出，9077 是核对信息；若模型多吐 9077，CodeValidator 不应额外放行来源不明的短尾号串。
+        val content = """[{"code":"1-6-5020","type":"pickup_parcel","source":"圆通快递",
+            "address":"韩梅诊所对面菜鸟","station":"韩梅诊所对面菜鸟","cabinet":""}]"""
+        assertEquals(listOf("1-6-5020"), AIExtractor.parseResults(content).map { it.code })
+    }
+
+    @Test
     @DisplayName("视觉不支持判定：用于自动回退文本通道")
     fun visionUnsupported() {
         assertTrue(AIExtractor.isVisionUnsupportedError("HTTP 400: This model does not support image input"))

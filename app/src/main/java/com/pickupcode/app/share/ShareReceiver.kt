@@ -411,6 +411,7 @@ object ShareReceiver {
             if (settings.enableAI && settings.apiKey.isNotBlank()) {
                 val imageMode = !aiImageBase64.isNullOrBlank()
                 val budget = if (imageMode) 25_000L else 8_000L
+                val aiText = AddressExtractor.formatTextForAi(lines).ifBlank { allText }
                 val aiRes = kotlinx.coroutines.withTimeoutOrNull(budget) {
                     if (imageMode) {
                         AIExtractor.extractFromImage(
@@ -418,10 +419,10 @@ object ShareReceiver {
                             apiKey = settings.apiKey,
                             apiBaseUrl = settings.apiBaseUrl,
                             model = settings.apiModel,
-                            fallbackText = allText
+                            fallbackText = aiText
                         )
                     } else {
-                        AIExtractor.extract(allText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
+                        AIExtractor.extract(aiText, settings.apiKey, settings.apiBaseUrl, settings.apiModel)
                     }
                 }
                 if (aiRes != null) {
@@ -441,10 +442,10 @@ object ShareReceiver {
                         (if (BuildConfig.DEBUG) ": " + aiRes.results.joinToString { "${it.code}(${it.type})@${it.address}" } else ""))
                     for (ai in aiRes.results) {
                         // AI 给出的地址/柜号：无论最终是否新增码都要登记，供管线在本地取不到时填空
-                        ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code] = it }
-                        ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code] = it }
+                        ai.address.ifBlank { ai.station }.takeIf { it.isNotBlank() }?.let { aiAddressHints[ai.code.uppercase()] = it }
+                        ai.cabinet.takeIf { it.isNotBlank() }?.let { aiCabinetHints[ai.code.uppercase()] = it }
                         if (isTypeDisabled(ai.type, settings)) continue
-                        if (allResults.any { it.code == ai.code && it.type == ai.type }) continue // 同码同type去重
+                        if (allResults.any { it.code.equals(ai.code, ignoreCase = true) && it.type == ai.type }) continue // 同码同type去重
                         allResults.add(CodeExtractor.ExtractedCode(ai.code, ai.type, ai.source, 1.0f))
                     }
                 } else {
@@ -483,6 +484,7 @@ object ShareReceiver {
             shareSourceName = shareSourceName,
             aiAddressHints = aiAddressHints,
             aiCabinetHints = aiCabinetHints,
+            aiUsedImage = !aiImageBase64.isNullOrBlank(),
             repo = db.repository
         )
         // 通知（同码同 type 已存在 → 重复提示；否则正常通知）
@@ -511,32 +513,32 @@ object ShareReceiver {
 
         // 快递100 反向验证：识别到运单号时反查取件码/地址作为标准答案（fire-and-forget，与无障碍路径一致）
         if (settings.enableKuaidi100 && settings.kuaidi100Key.isNotBlank()) {
-            val trackingNum = BrandResolver.findOrderNumber(allText)
-            if (trackingNum != null) {
+            val trackingNums = BrandResolver.findAllOrderNumbers(allText)
+            if (trackingNums.isNotEmpty()) {
                 scope.launch(Dispatchers.IO) {
-                    try {
-                        val res = PostVerifier.verifyKuaidi100(context, settings.kuaidi100Key, trackingNum, allResults.map { it.code })
-                            ?: return@launch
-                        val pCode = res.pickUpCode ?: return@launch
-                        if (res.pickUpAddress.isNullOrBlank().not()) {
-                            // Low-3: 优先定向更新本次保存的记录（同码可能有多行历史，findByCodeAndType 会命中错误行）
-                            // 定向列更新，避免整行 update 用旧快照覆盖用户并发编辑
-                            val targetId = savedIdsByCode[pCode]
-                            if (targetId != null) {
-                                db.repository.getByIdSuspend(targetId)?.let { rec ->
-                                    if (rec.pickupAddress.isBlank()) {
-                                        db.repository.updatePickupAddress(targetId, res.pickUpAddress!!)
+                    for (trackingNum in trackingNums) {
+                        try {
+                            val res = PostVerifier.verifyKuaidi100(context, settings.kuaidi100Key, trackingNum, allResults.map { it.code })
+                                ?: continue
+                            val pCode = res.pickUpCode ?: continue
+                            if (res.pickUpAddress.isNullOrBlank().not()) {
+                                val targetId = savedIdsByCode[pCode]
+                                if (targetId != null) {
+                                    db.repository.getByIdSuspend(targetId)?.let { rec ->
+                                        if (rec.pickupAddress.isBlank()) {
+                                            db.repository.updatePickupAddress(targetId, res.pickUpAddress!!)
+                                        }
+                                    }
+                                } else {
+                                    val rec = db.repository.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
+                                    if (rec != null && rec.pickupAddress.isBlank()) {
+                                        db.repository.updatePickupAddress(rec.id, res.pickUpAddress!!)
                                     }
                                 }
-                            } else {
-                                val rec = db.repository.findByCodeAndType(pCode, CodeExtractor.CodeType.pickup_parcel.name)
-                                if (rec != null && rec.pickupAddress.isBlank()) {
-                                    db.repository.updatePickupAddress(rec.id, res.pickUpAddress!!)
-                                }
                             }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Kuaidi100 verify error: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Kuaidi100 verify error: ${e.message}")
                     }
                 }
             }
