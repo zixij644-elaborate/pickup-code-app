@@ -30,6 +30,8 @@ import com.pickupcode.app.preferences.AppPreferences
 import com.pickupcode.app.share.ShareReceiver
 import com.pickupcode.app.service.PickupCodeAccessibilityService
 import com.pickupcode.app.ui.components.ManualCodeDialog
+import com.pickupcode.app.ui.components.UpdateAvailableDialog
+import com.pickupcode.app.util.UpdateChecker
 import com.pickupcode.app.ui.screens.CodeDetailScreen
 import com.pickupcode.app.ui.screens.EditField
 import com.pickupcode.app.ui.screens.DedupScreen
@@ -53,6 +55,8 @@ class MainActivity : ComponentActivity() {
     // Medium-1: currentScreen/selectedCodeId/showManualDialog 已移至 setContent 内用 rememberSaveable 管理（旋转不丢状态）
     // B3: showDuplicate 通知点击后待处理的去重入口跳转（onCreate/onNewIntent 置位，组合期消费）
     private var pendingDedup by mutableStateOf(false)
+    // 开屏异步检测到的可用新版本（非空时弹出更新提示对话框）
+    private var availableUpdate by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
 
     enum class Screen { Home, Settings, Detail, Trash, Stats, Dedup, SavedAddress, IdentityCode, Rules }
 
@@ -78,6 +82,9 @@ class MainActivity : ComponentActivity() {
         refreshAccessibilityStates()
         // 冷启动竞态：无障碍服务绑定可能晚于 Activity 创建（几百 ms~秒级），1.5s 后补刷一次
         Handler(Looper.getMainLooper()).postDelayed({ refreshAccessibilityStates() }, 1500)
+
+        // 开屏异步检测 GitHub Releases 新版本（静默后台执行，不阻塞启动）
+        checkUpdateOnLaunch()
 
         setContent {
             // Medium-1: 导航状态用 rememberSaveable 管理，旋转屏幕不丢失
@@ -174,6 +181,19 @@ class MainActivity : ComponentActivity() {
                         onConfirm = { code, type, source ->
                             saveManualCode(code, type, source)
                             showManualDialog = false
+                        }
+                    )
+                }
+
+                availableUpdate?.let { release ->
+                    UpdateAvailableDialog(
+                        release = release,
+                        currentVersion = BuildConfig.VERSION_NAME,
+                        onDismiss = { availableUpdate = null },
+                        onIgnoreVersion = { ver ->
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                AppPreferences.setIgnoredUpdateVersion(this@MainActivity, ver)
+                            }
                         }
                     )
                 }
@@ -301,6 +321,27 @@ class MainActivity : ComponentActivity() {
         return enabledServices.split(':').any { it.trim() == target }
     }
 
+    /** 开屏异步检测更新：每进程启动仅静默检测一次，失败不打扰；发现未忽略的新版本时弹窗告知。 */
+    private fun checkUpdateOnLaunch() {
+        if (hasCheckedUpdateOnLaunch) return
+        hasCheckedUpdateOnLaunch = true
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)
+                if (result is UpdateChecker.CheckResult.Available) {
+                    val ignored = AppPreferences.getIgnoredUpdateVersion(this@MainActivity)
+                    if (ignored != result.release.versionName) {
+                        withContext(Dispatchers.Main) {
+                            availableUpdate = result.release
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "开屏检测更新失败", e)
+            }
+        }
+    }
+
     private fun openAccessibilitySettings() {
         try {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -310,6 +351,11 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "无法打开无障碍设置", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    companion object {
+        @Volatile
+        private var hasCheckedUpdateOnLaunch = false
     }
 }
 

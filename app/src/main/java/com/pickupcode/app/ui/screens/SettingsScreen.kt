@@ -758,13 +758,25 @@ private fun AboutSection(sc: SettingsCtx) {    SettingsSectionCard(title = "关�
         Spacer(Modifier.height(8.dp))
         var upStatus by remember { mutableStateOf<String?>(null) }
         var checking by remember { mutableStateOf(false) }
+        var foundRelease by remember { mutableStateOf<com.pickupcode.app.util.UpdateChecker.ReleaseInfo?>(null) }
         OutlinedButton(
             onClick = {
                 checking = true
                 sc.scope.launch {
-                    val result = checkUpdate()
-                    upStatus = result
-                    if (result.startsWith("检查失败")) Toast.makeText(sc.ctx, result, Toast.LENGTH_SHORT).show()
+                    when (val result = com.pickupcode.app.util.UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)) {
+                        is com.pickupcode.app.util.UpdateChecker.CheckResult.Available -> {
+                            upStatus = "发现新版本 v${result.release.versionName}"
+                            foundRelease = result.release
+                        }
+                        com.pickupcode.app.util.UpdateChecker.CheckResult.UpToDate -> {
+                            upStatus = "当前已是最新版本"
+                        }
+                        is com.pickupcode.app.util.UpdateChecker.CheckResult.Error -> {
+                            val msg = "检查失败: ${result.message}"
+                            upStatus = msg
+                            Toast.makeText(sc.ctx, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     checking = false
                 }
             },
@@ -776,6 +788,13 @@ private fun AboutSection(sc: SettingsCtx) {    SettingsSectionCard(title = "关�
         upStatus?.let {
             Text(it, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        foundRelease?.let { release ->
+            com.pickupcode.app.ui.components.UpdateAvailableDialog(
+                release = release,
+                currentVersion = BuildConfig.VERSION_NAME,
+                onDismiss = { foundRelease = null }
+            )
         }
     }
 }
@@ -944,19 +963,4 @@ private fun Kuaidi100HelpSection() {
             }
         }
     }
-}
-
-private suspend fun checkUpdate(): String = withContext(Dispatchers.IO) {
-    var resp: java.net.HttpURLConnection? = null
-    try {
-        resp = java.net.URL("https://api.github.com/repos/zixij644-elaborate/pickup-code-app/releases/latest")
-            .openConnection() as java.net.HttpURLConnection
-        resp.requestMethod = "GET"; resp.setRequestProperty("Accept", "application/vnd.github.v3+json")
-        resp.setRequestProperty("User-Agent", "pickup-code-app-checkupdate")
-        resp.connectTimeout = 10000; resp.readTimeout = 10000
-        if (resp.responseCode != 200) return@withContext "检查失败"
-        val latest = org.json.JSONObject(resp.inputStream.bufferedReader().use { it.readText() }).getString("tag_name").removePrefix("v")
-        if (latest == BuildConfig.VERSION_NAME) "当前已是最新版本" else "发现新版本 v$latest"
-    } catch (e: Exception) { "检查失败: ${e.message}" }
-    finally { resp?.disconnect() }
 }

@@ -97,6 +97,9 @@ object AppPreferences {
     /** 是否启用到期提醒（快递码存放 3 天/文本时限到达时自动提醒；v6）。 */
     private val KEY_ENABLE_EXPIRY_REMIND = booleanPreferencesKey("enable_expiry_remind")
 
+    /** 开屏更新弹窗中用户选择「忽略此版本」的版本号（如 "1.1.3"）。 */
+    private val KEY_IGNORED_UPDATE_VERSION = stringPreferencesKey("ignored_update_version")
+
     /** 全部设置项的聚合快照：observe 的每次发射即一个不可变副本。 */
     data class Settings(
         val confidenceThreshold: Float = 0.5f,
@@ -222,6 +225,14 @@ object AppPreferences {
 
     suspend fun setEnableSmsReceive(context: Context, value: Boolean) =
         write(context, KEY_ENABLE_SMS_RECEIVE, value)
+
+    /** 读取开屏更新已忽略的版本号（空串表示未忽略）。 */
+    suspend fun getIgnoredUpdateVersion(context: Context): String =
+        context.dataStore.data.first()[KEY_IGNORED_UPDATE_VERSION] ?: ""
+
+    /** 记录用户在开屏更新弹窗中忽略的版本号。 */
+    suspend fun setIgnoredUpdateVersion(context: Context, version: String) =
+        write(context, KEY_IGNORED_UPDATE_VERSION, version)
 
     // ---------------------------------------------------------------
     // B6: API Key 加密（AndroidKeyStore AES-GCM，密文存 DataStore）
