@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.pickupcode.app.learner.DailyStats
 import com.pickupcode.app.learner.PatternLearner
 import com.pickupcode.app.learner.PatternLearner.PatternSuggestion
@@ -71,9 +73,10 @@ fun StatsScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { IconText(R.drawable.ic_bar_chart_3, "识别统计", iconSize = 20.dp) },
+                title = { Text("识别统计", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
@@ -91,7 +94,10 @@ fun StatsScreen(onBack: () -> Unit) {
                             Icon(Icons.Default.Share, "分享成绩卡")
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { padding ->
@@ -137,7 +143,9 @@ fun StatsScreen(onBack: () -> Unit) {
 private fun OverviewCard(stats: PatternStats) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Text("总览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -181,7 +189,9 @@ private fun PatternBreakdownCard(stats: PatternStats) {
     val maxCount = patterns.maxOf { it.value }
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Text("模式分布", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -221,7 +231,9 @@ private fun SuggestionsCard(suggestions: List<PatternSuggestion>, onCleared: (Bo
 
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +257,9 @@ private fun SuggestionsCard(suggestions: List<PatternSuggestion>, onCleared: (Bo
                 suggestions.forEach { sug ->
                     Card(
                         Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -299,7 +313,9 @@ private fun SuggestionsCard(suggestions: List<PatternSuggestion>, onCleared: (Bo
 private fun EmptyStateMessage() {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("暂无统计数据", style = MaterialTheme.typography.titleMedium)
@@ -318,7 +334,9 @@ private fun EmptyStateMessage() {
 private fun HitRateCard(stats: List<DailyStats.DayStat>) {
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             IconText(R.drawable.ic_trending_up, "命中率趋势", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -394,7 +412,9 @@ private fun LearnedRulesCard(rules: List<PatternLearner.LearnedRule>, onChanged:
     val scope = rememberCoroutineScope()
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             IconText(R.drawable.ic_brain, "已学习规则", iconSize = 18.dp, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
