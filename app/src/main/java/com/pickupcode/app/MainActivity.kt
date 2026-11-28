@@ -13,8 +13,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +39,8 @@ import com.pickupcode.app.service.CodeCompletion
 import com.pickupcode.app.preferences.AppPreferences
 import com.pickupcode.app.share.ShareReceiver
 import com.pickupcode.app.service.PickupCodeAccessibilityService
+import com.pickupcode.app.ui.components.LocalAnimatedVisibilityScope
+import com.pickupcode.app.ui.components.LocalSharedTransitionScope
 import com.pickupcode.app.ui.components.ManualCodeDialog
 import com.pickupcode.app.ui.components.UpdateAvailableDialog
 import com.pickupcode.app.util.UpdateChecker
@@ -92,6 +103,8 @@ class MainActivity : ComponentActivity() {
             // Medium-1: 导航状态用 rememberSaveable 管理，旋转屏幕不丢失
             var currentScreen by rememberSaveable { mutableStateOf(Screen.Home.name) }
             var selectedCodeId by rememberSaveable { mutableLongStateOf(-1L) }
+            // 主页点击时顺带缓存内存快照，作为详情页 Flow 首帧初始值，避免闪 1~2 帧「加载中...」
+            var selectedCodeSnapshot by remember { mutableStateOf<CodeHistory?>(null) }
             var showManualDialog by rememberSaveable { mutableStateOf(false) }
             val screen = Screen.valueOf(currentScreen)
 
@@ -113,69 +126,95 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            @OptIn(ExperimentalSharedTransitionApi::class)
             PickupCodeTheme(darkMode = settings.darkMode) {
-                when (screen) {
-                    Screen.Home -> HomeScreen(
-                        hasNotificationPermission = hasNotificationPermission,
-                        isAccessibilityEnabled = isAccessibilityConnected,
-                        accessibilityEnabledInSettings = isAccessibilityEnabled,
-                        hideAccessibilityCard = settings.hideAccessibilityCard,
-                        hideGuideCard = settings.hideGuideCard,
-                        onRequestNotificationPermission = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                notificationPermissionLauncher.launch(
-                                    android.Manifest.permission.POST_NOTIFICATIONS
-                                )
+                SharedTransitionLayout {
+                    CompositionLocalProvider(LocalSharedTransitionScope provides this) {
+                        AnimatedContent(
+                            targetState = screen,
+                            transitionSpec = {
+                                if (
+                                    (initialState == Screen.Home && targetState == Screen.Detail) ||
+                                    (initialState == Screen.Detail && targetState == Screen.Home)
+                                ) {
+                                    fadeIn(animationSpec = tween(220)) togetherWith
+                                        fadeOut(animationSpec = tween(180))
+                                } else {
+                                    fadeIn(animationSpec = tween(180)) togetherWith
+                                        fadeOut(animationSpec = tween(150))
+                                }
+                            },
+                            label = "screen_transition"
+                        ) { targetScreen ->
+                            CompositionLocalProvider(LocalAnimatedVisibilityScope provides this) {
+                                when (targetScreen) {
+                                    Screen.Home -> HomeScreen(
+                                        hasNotificationPermission = hasNotificationPermission,
+                                        isAccessibilityEnabled = isAccessibilityConnected,
+                                        accessibilityEnabledInSettings = isAccessibilityEnabled,
+                                        hideAccessibilityCard = settings.hideAccessibilityCard,
+                                        hideGuideCard = settings.hideGuideCard,
+                                        onRequestNotificationPermission = {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                notificationPermissionLauncher.launch(
+                                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                                )
+                                            }
+                                        },
+                                        onEnableAccessibility = { openAccessibilitySettings() },
+                                        onHideAccessibilityCard = {
+                                            lifecycleScope.launch(Dispatchers.IO) {
+                                                AppPreferences.setHideAccessibilityCard(this@MainActivity, true)
+                                            }
+                                        },
+                                        onHideGuideCard = {
+                                            lifecycleScope.launch(Dispatchers.IO) {
+                                                AppPreferences.setHideGuideCard(this@MainActivity, true)
+                                            }
+                                        },
+                                        onSettingsClick = { currentScreen = Screen.Settings.name },
+                                        onItemClick = { item ->
+                                            selectedCodeId = item.id
+                                            selectedCodeSnapshot = item
+                                            currentScreen = Screen.Detail.name
+                                        },
+                                        onFabClick = { showManualDialog = true },
+                                        onTrashClick = { currentScreen = Screen.Trash.name },
+                                        onDedupClick = { currentScreen = Screen.Dedup.name }
+                                    )
+                                    Screen.Settings -> SettingsScreen(
+                                        onBack = { currentScreen = Screen.Home.name },
+                                        onStatsClick = { currentScreen = Screen.Stats.name },
+                                        onSavedAddressClick = { currentScreen = Screen.SavedAddress.name },
+                                        onRulesClick = { currentScreen = Screen.Rules.name }
+                                    )
+                                    Screen.Detail -> DetailScreenWrapper(
+                                        codeId = selectedCodeId,
+                                        initialItem = selectedCodeSnapshot?.takeIf { it.id == selectedCodeId },
+                                        onBack = { currentScreen = Screen.Home.name }
+                                    )
+                                    Screen.Trash -> TrashScreen(
+                                        onBack = { currentScreen = Screen.Home.name }
+                                    )
+                                    Screen.Stats -> StatsScreen(
+                                        onBack = { currentScreen = Screen.Home.name }
+                                    )
+                                    Screen.Dedup -> DedupScreen(
+                                        onBack = { currentScreen = Screen.Home.name }
+                                    )
+                                    Screen.SavedAddress -> SavedAddressScreen(
+                                        onBack = { currentScreen = Screen.Settings.name }
+                                    )
+                                    Screen.IdentityCode -> IdentityCodeScreen(
+                                        onBack = { currentScreen = Screen.Home.name }
+                                    )
+                                    Screen.Rules -> RulesScreen(
+                                        onBack = { currentScreen = Screen.Settings.name }
+                                    )
+                                }
                             }
-                        },
-                        onEnableAccessibility = { openAccessibilitySettings() },
-                        onHideAccessibilityCard = {
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                AppPreferences.setHideAccessibilityCard(this@MainActivity, true)
-                            }
-                        },
-                        onHideGuideCard = {
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                AppPreferences.setHideGuideCard(this@MainActivity, true)
-                            }
-                        },
-                        onSettingsClick = { currentScreen = Screen.Settings.name },
-                        onItemClick = { id ->
-                            selectedCodeId = id
-                            currentScreen = Screen.Detail.name
-                        },
-                        onFabClick = { showManualDialog = true },
-                        onTrashClick = { currentScreen = Screen.Trash.name },
-                        onDedupClick = { currentScreen = Screen.Dedup.name }
-                    )
-                    Screen.Settings -> SettingsScreen(
-                        onBack = { currentScreen = Screen.Home.name },
-                        onStatsClick = { currentScreen = Screen.Stats.name },
-                        onSavedAddressClick = { currentScreen = Screen.SavedAddress.name },
-                        onRulesClick = { currentScreen = Screen.Rules.name }
-                    )
-                    Screen.Detail -> DetailScreenWrapper(
-                        codeId = selectedCodeId,
-                        onBack = { currentScreen = Screen.Home.name }
-                    )
-                    Screen.Trash -> TrashScreen(
-                        onBack = { currentScreen = Screen.Home.name }
-                    )
-                    Screen.Stats -> StatsScreen(
-                        onBack = { currentScreen = Screen.Home.name }
-                    )
-                    Screen.Dedup -> DedupScreen(
-                        onBack = { currentScreen = Screen.Home.name }
-                    )
-                    Screen.SavedAddress -> SavedAddressScreen(
-                        onBack = { currentScreen = Screen.Settings.name }
-                    )
-                    Screen.IdentityCode -> IdentityCodeScreen(
-                        onBack = { currentScreen = Screen.Home.name }
-                    )
-                    Screen.Rules -> RulesScreen(
-                        onBack = { currentScreen = Screen.Settings.name }
-                    )
+                        }
+                    }
                 }
 
                 if (showManualDialog) {
@@ -232,9 +271,14 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun DetailScreenWrapper(codeId: Long, onBack: () -> Unit) {
-        val db = AppDatabase.getInstance(this)
-        val item by db.repository.getById(codeId).collectAsState(initial = null)
+    private fun DetailScreenWrapper(
+        codeId: Long,
+        initialItem: CodeHistory?,
+        onBack: () -> Unit
+    ) {
+        val db = remember { AppDatabase.getInstance(this) }
+        val itemFlow = remember(codeId) { db.repository.getById(codeId) }
+        val item by itemFlow.collectAsState(initial = initialItem)
 
         item?.let { code ->
             CodeDetailScreen(
@@ -279,8 +323,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             )
-        } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("加载中...")
+        } ?: Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("加载中...", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 

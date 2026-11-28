@@ -88,7 +88,7 @@ fun HomeScreen(
     onHideAccessibilityCard: () -> Unit,
     onHideGuideCard: () -> Unit,
     onSettingsClick: () -> Unit,
-    onItemClick: (Long) -> Unit,
+    onItemClick: (CodeHistory) -> Unit,
     onFabClick: () -> Unit,
     onTrashClick: () -> Unit,
     onDedupClick: () -> Unit
@@ -104,8 +104,8 @@ fun HomeScreen(
     val dedupCount by vm::dedupCount
     var typeFilter by remember { mutableStateOf("all") }
     var guideExpanded by remember { mutableStateOf(false) }
-    // 分组方式：time=按时间 / address=按地址聚合（rememberSaveable：旋转屏幕保持）
-    var groupMode by rememberSaveable { mutableStateOf("time") }
+    // 分组方式：address=按地址聚合（默认） / time=按时间（rememberSaveable：旋转屏幕保持）
+    var groupMode by rememberSaveable { mutableStateOf("address") }
 
     val filteredHistory = remember(activeHistory, typeFilter) {
         activeHistory.filter { h ->
@@ -140,7 +140,13 @@ fun HomeScreen(
     val addressGroups: List<Pair<String, List<CodeHistory>>> =
         remember(filteredHistory) { HomeGrouping.byAddress(filteredHistory) }
 
-            LaunchedEffect(Unit) { vm.cleanExpired() }
+            LaunchedEffect(Unit) {
+                vm.cleanExpired()
+                withContext(Dispatchers.IO) {
+                    com.pickupcode.app.learner.PatternLearner.warmConfirmCache(context)
+                    com.pickupcode.app.learner.CommonStationStore.warmPickupPointsCache(context)
+                }
+            }
 
             // 共享操作：标记已取/删除 → 移入回收站 → snackbar 撤销
             fun markAsDone(item: CodeHistory) {
@@ -433,7 +439,7 @@ fun HomeScreen(
                     items(groupItems, key = { it.id }) { cardItem ->
                         CodeHistoryCard(
                             item = cardItem,
-                            onClick = { onItemClick(cardItem.id) },
+                            onClick = { onItemClick(cardItem) },
                             onDone = { markAsDone(cardItem) },
                             onDelete = { markAsDone(cardItem) }
                         )
@@ -448,7 +454,7 @@ fun HomeScreen(
                     items(groupItems, key = { it.id }) { item ->
                         CodeHistoryCard(
                             item = item,
-                            onClick = { onItemClick(item.id) },
+                            onClick = { onItemClick(item) },
                             onDone = { markAsDone(item) },
                             onDelete = { markAsDone(item) }
                         )

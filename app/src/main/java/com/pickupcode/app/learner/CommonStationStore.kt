@@ -157,6 +157,50 @@ object CommonStationStore {
 
     data class PickupPoint(val name: String, val count: Int, val lastUsedAt: Long)
 
+    @Volatile
+    private var cachedPickupPoints: Map<String, PickupPoint>? = null
+
+    /** 在 IO 线程预热常用取件点内存缓存，避免详情页首帧异步插入 AssistChip 导致布局下推。 */
+    fun warmPickupPointsCache(context: Context) {
+        if (cachedPickupPoints == null) {
+            loadPickupPointsMap(context)
+        }
+    }
+
+    fun isPickupPointsCacheReady(): Boolean = cachedPickupPoints != null
+
+    /** 纯内存查询常用取件点（零 IO / 零解密）；调用前可用 [isPickupPointsCacheReady] 判断是否已预热。 */
+    fun peekFrequentPickupPoint(address: String): PickupPoint? {
+        if (address.isBlank()) return null
+        val point = cachedPickupPoints?.get(address.trim()) ?: return null
+        return if (point.count >= 2) point else null
+    }
+
+    private fun loadPickupPointsMap(context: Context): Map<String, PickupPoint> {
+        if (hasUnreadableEncrypted(context, PICKUP_PREFS, KEY_PICKUP_POINTS)) return emptyMap()
+        val json = readJson(context, PICKUP_PREFS, KEY_PICKUP_POINTS)
+        val result = if (json == null) {
+            emptyMap()
+        } else {
+            try {
+                val arr = JSONArray(json)
+                buildMap {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val addr = o.optString("address", "")
+                        if (addr.isNotBlank()) {
+                            put(addr, PickupPoint(o.optString("name"), o.optInt("count"), o.optLong("last", 0L)))
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
+        cachedPickupPoints = result
+        return result
+    }
+
     /** 记录一次取件地址出现（识别/标记已取时调用），用于归并"常用取件点"。 */
     // B13: read-modify-write 需原子化——识别线程与详情页「标记已取」可并发调用，无锁会丢失计数
     @Synchronized
@@ -179,27 +223,21 @@ object CommonStationStore {
         map[key] = PickupPoint(key, (prev?.count ?: 0) + 1, System.currentTimeMillis())
         val sorted = map.entries.sortedByDescending { it.value.count }.take(MAX_PICKUP_POINTS)
         val out = JSONArray()
+        val trimmedMap = linkedMapOf<String, PickupPoint>()
         for ((addr, p) in sorted) {
+            trimmedMap[addr] = p
             out.put(JSONObject().apply { put("address", addr); put("name", p.name); put("count", p.count); put("last", p.lastUsedAt) })
         }
         writeJson(context, PICKUP_PREFS, KEY_PICKUP_POINTS, out.toString())
+        cachedPickupPoints = trimmedMap
     }
 
     /** 该地址是否已是常用取件点（出现 >= 2 次）。返回 null 表示不是。 */
     fun isFrequentPickupPoint(context: Context, address: String): PickupPoint? {
         if (address.isBlank()) return null
-        if (hasUnreadableEncrypted(context, PICKUP_PREFS, KEY_PICKUP_POINTS)) return null
-        val json = readJson(context, PICKUP_PREFS, KEY_PICKUP_POINTS) ?: return null
-        return try {
-            val arr = JSONArray(json)
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                if (o.optString("address") == address.trim() && o.optInt("count") >= 2) {
-                    return PickupPoint(o.optString("name"), o.optInt("count"), o.optLong("last", 0L))
-                }
-            }
-            null
-        } catch (_: Exception) { null }
+        val map = cachedPickupPoints ?: loadPickupPointsMap(context)
+        val point = map[address.trim()] ?: return null
+        return if (point.count >= 2) point else null
     }
 
     /**

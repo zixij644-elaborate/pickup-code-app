@@ -2,13 +2,21 @@ package com.pickupcode.app.ui.components
 
 import android.widget.Toast
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
@@ -31,6 +39,15 @@ import kotlinx.coroutines.withContext
  *
  * 点击 → [IdentityCodeLauncher] 三级降级跳转；任何失败都弹 Toast 明确告知，不静默失败。
  */
+/** 进程级缓存：主页已异步查过三家 App 安装状态后，进详情页首帧直接复用，避免图标 alpha 闪 1~2 帧。 */
+@Volatile
+private var cachedInstalledApps: Map<String, Boolean>? = null
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { null }
+val LocalAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> { null }
+
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun IdentityCodeTopBarActions() {
     val context = LocalContext.current
@@ -38,7 +55,7 @@ fun IdentityCodeTopBarActions() {
     val tint = MaterialTheme.colorScheme.onSurface
     // 安装状态异步在 IO 线程读取，避免放主页顶栏后在冷启动首帧做 3 次同步 PackageManager Binder IPC
     val installed by produceState(
-        initialValue = mapOf(
+        initialValue = cachedInstalledApps ?: mapOf(
             IdentityCodeLauncher.TAOBAO to true,
             IdentityCodeLauncher.CAINIAO to true,
             IdentityCodeLauncher.PINDUODUO to true
@@ -52,6 +69,7 @@ fun IdentityCodeTopBarActions() {
                 IdentityCodeLauncher.PINDUODUO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.PINDUODUO)
             )
         }
+        cachedInstalledApps = checked
         value = checked
     }
 
@@ -61,14 +79,39 @@ fun IdentityCodeTopBarActions() {
         }
     }
 
-    IdentityTopBarButton(R.drawable.ic_brand_taobao, "淘宝身份码", tint, installed[IdentityCodeLauncher.TAOBAO] == true) {
-        open { IdentityCodeLauncher.openTaobao(it) }
+    val sharedScope = LocalSharedTransitionScope.current
+    val animatedScope = LocalAnimatedVisibilityScope.current
+    val sharedModifier = if (sharedScope != null && animatedScope != null) {
+        with(sharedScope) {
+            Modifier.sharedElement(
+                rememberSharedContentState(key = "identity_top_bar_actions"),
+                animatedVisibilityScope = animatedScope,
+                boundsTransform = { _, _ ->
+                    spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                },
+                zIndexInOverlay = 1f
+            )
+        }
+    } else {
+        Modifier
     }
-    IdentityTopBarButton(R.drawable.ic_brand_cainiao, "菜鸟出库码", tint, installed[IdentityCodeLauncher.CAINIAO] == true) {
-        open { IdentityCodeLauncher.openCainiao(it) }
-    }
-    IdentityTopBarButton(R.drawable.ic_brand_pinduoduo, "拼多多身份码", tint, installed[IdentityCodeLauncher.PINDUODUO] == true) {
-        open { IdentityCodeLauncher.openPinduoduo(it) }
+
+    Row(
+        modifier = sharedModifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IdentityTopBarButton(R.drawable.ic_brand_taobao, "淘宝身份码", tint, installed[IdentityCodeLauncher.TAOBAO] == true) {
+            open { IdentityCodeLauncher.openTaobao(it) }
+        }
+        IdentityTopBarButton(R.drawable.ic_brand_cainiao, "菜鸟出库码", tint, installed[IdentityCodeLauncher.CAINIAO] == true) {
+            open { IdentityCodeLauncher.openCainiao(it) }
+        }
+        IdentityTopBarButton(R.drawable.ic_brand_pinduoduo, "拼多多身份码", tint, installed[IdentityCodeLauncher.PINDUODUO] == true) {
+            open { IdentityCodeLauncher.openPinduoduo(it) }
+        }
     }
 }
 

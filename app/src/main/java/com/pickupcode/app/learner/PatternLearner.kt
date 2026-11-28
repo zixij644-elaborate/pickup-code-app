@@ -540,18 +540,98 @@ object PatternLearner {
     // Per-item confirmation state persistence (by history ID)
     // ---------------------------------------------------------------
 
+    data class ConfirmFlags(
+        val codeConfirmed: Boolean = false,
+        val codeIncorrect: Boolean = false,
+        val sourceConfirmed: Boolean = false,
+        val sourceIncorrect: Boolean = false,
+        val addrConfirmed: Boolean = false,
+        val addrIncorrect: Boolean = false
+    )
+
+    @Volatile
+    private var confirmCache: java.util.concurrent.ConcurrentHashMap<Long, ConfirmFlags>? = null
+
+    /** 在 IO 线程预热 per-item 确认状态缓存，避免详情页首帧异步回填导致按钮行高度突变。 */
+    fun warmConfirmCache(ctx: Context) {
+        if (confirmCache != null) return
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val map = java.util.concurrent.ConcurrentHashMap<Long, ConfirmFlags>()
+        for ((key, raw) in prefs.all) {
+            if (!key.startsWith("ci_") || raw != true) continue
+            val rest = key.removePrefix("ci_")
+            val sep = rest.indexOf('_')
+            if (sep <= 0) continue
+            val id = rest.substring(0, sep).toLongOrNull() ?: continue
+            val suffix = rest.substring(sep + 1)
+            val prev = map[id] ?: ConfirmFlags()
+            map[id] = when (suffix) {
+                "code" -> prev.copy(codeConfirmed = true)
+                "code_bad" -> prev.copy(codeIncorrect = true)
+                "src" -> prev.copy(sourceConfirmed = true)
+                "src_bad" -> prev.copy(sourceIncorrect = true)
+                "addr" -> prev.copy(addrConfirmed = true)
+                "addr_bad" -> prev.copy(addrIncorrect = true)
+                else -> prev
+            }
+        }
+        confirmCache = map
+    }
+
+    /** 纯内存读取确认状态（零 IO）；缓存未预热时返回 null，由调用方走 IO 线程兜底。 */
+    fun peekConfirmFlags(id: Long): ConfirmFlags? =
+        confirmCache?.let { it[id] ?: ConfirmFlags() }
+
+    /** 在 IO 线程读取并回填单条记录的确认状态。 */
+    fun loadConfirmFlags(ctx: Context, id: Long): ConfirmFlags {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val flags = ConfirmFlags(
+            codeConfirmed = prefs.getBoolean("ci_${id}_code", false),
+            codeIncorrect = prefs.getBoolean("ci_${id}_code_bad", false),
+            sourceConfirmed = prefs.getBoolean("ci_${id}_src", false),
+            sourceIncorrect = prefs.getBoolean("ci_${id}_src_bad", false),
+            addrConfirmed = prefs.getBoolean("ci_${id}_addr", false),
+            addrIncorrect = prefs.getBoolean("ci_${id}_addr_bad", false)
+        )
+        confirmCache?.put(id, flags)
+        return flags
+    }
+
+    private fun updateConfirmCache(id: Long, transform: (ConfirmFlags) -> ConfirmFlags) {
+        val cache = confirmCache ?: return
+        cache.compute(id) { _, prev -> transform(prev ?: ConfirmFlags()) }
+    }
+
     fun isCodeConfirmed(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_code", false)
-    fun setCodeConfirmed(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_code", v).apply()
+    fun setCodeConfirmed(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_code", v).apply()
+        updateConfirmCache(id) { it.copy(codeConfirmed = v) }
+    }
     fun isSourceConfirmed(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_src", false)
-    fun setSourceConfirmed(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_src", v).apply()
+    fun setSourceConfirmed(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_src", v).apply()
+        updateConfirmCache(id) { it.copy(sourceConfirmed = v) }
+    }
     fun isAddrConfirmed(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_addr", false)
-    fun setAddrConfirmed(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_addr", v).apply()
+    fun setAddrConfirmed(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_addr", v).apply()
+        updateConfirmCache(id) { it.copy(addrConfirmed = v) }
+    }
     fun isCodeIncorrect(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_code_bad", false)
-    fun setCodeIncorrect(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_code_bad", v).apply()
+    fun setCodeIncorrect(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_code_bad", v).apply()
+        updateConfirmCache(id) { it.copy(codeIncorrect = v) }
+    }
     fun isSourceIncorrect(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_src_bad", false)
-    fun setSourceIncorrect(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_src_bad", v).apply()
+    fun setSourceIncorrect(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_src_bad", v).apply()
+        updateConfirmCache(id) { it.copy(sourceIncorrect = v) }
+    }
     fun isAddrIncorrect(ctx: Context, id: Long) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ci_${id}_addr_bad", false)
-    fun setAddrIncorrect(ctx: Context, id: Long, v: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_addr_bad", v).apply()
+    fun setAddrIncorrect(ctx: Context, id: Long, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("ci_${id}_addr_bad", v).apply()
+        updateConfirmCache(id) { it.copy(addrIncorrect = v) }
+    }
 
     // ---------------------------------------------------------------
     // Auto-apply: check suggestions and persist high-confidence patterns

@@ -2,6 +2,8 @@ package com.pickupcode.app.ui.screens
 
 import android.content.Intent
 import android.util.Log
+import android.util.LruCache
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -55,6 +57,23 @@ private data class DetailConfirmState(
     val addrIncorrect: Boolean = false
 )
 
+private fun PatternLearner.ConfirmFlags.toDetailState() = DetailConfirmState(
+    codeConfirmed = codeConfirmed,
+    codeIncorrect = codeIncorrect,
+    sourceConfirmed = sourceConfirmed,
+    sourceIncorrect = sourceIncorrect,
+    addrConfirmed = addrConfirmed,
+    addrIncorrect = addrIncorrect
+)
+
+/** 截屏宽高比内存缓存：二次进入详情页时首帧即可按精确比例占位，避免图片加载后卡片高度突变。 */
+private val screenshotAspectCache = LruCache<String, Float>(32)
+
+private data class ScreenshotLoadState(
+    val exists: Boolean = true,
+    val bitmap: android.graphics.Bitmap? = null
+)
+
 /** 详情页可编辑字段（M20：编辑走定向 UPDATE，避免整行覆盖丢更新）。
  *  命名用 EditField，避免与下方同名 Composable 函数 EditableField 产生声明冲突。 */
 enum class EditField { CODE, SOURCE, CABINET, ADDRESS }
@@ -68,27 +87,20 @@ fun CodeDetailScreen(
     onMarkDone: ((Long) -> Unit)? = null
 ) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
-    // Medium-5: 6 个 PatternLearner 状态改用 produceState 在 IO 线程异步读取初始值
-    var confirmState by remember { mutableStateOf(DetailConfirmState()) }
-    val loadedConfirmState by produceState(initialValue = DetailConfirmState(), item.id) {
-        // 先算后赋：lint ProduceStateDoesNotAssignValue 要求 value 赋值直接位于 producer 块内
-        val loaded = withContext(Dispatchers.IO) {
-            DetailConfirmState(
-                codeConfirmed = PatternLearner.isCodeConfirmed(ctx, item.id),
-                codeIncorrect = PatternLearner.isCodeIncorrect(ctx, item.id),
-                sourceConfirmed = PatternLearner.isSourceConfirmed(ctx, item.id),
-                sourceIncorrect = PatternLearner.isSourceIncorrect(ctx, item.id),
-                addrConfirmed = PatternLearner.isAddrConfirmed(ctx, item.id),
-                addrIncorrect = PatternLearner.isAddrIncorrect(ctx, item.id)
-            )
-        }
-        value = loaded
-    }
-    LaunchedEffect(loadedConfirmState) {
-        // 仅在用户尚未交互（confirmState 仍为默认全 false）时回填异步加载的初始值，
-        // 避免加载完成后整份覆盖用户在慢设备上刚点的「确认/标记错误」。
-        if (confirmState == DetailConfirmState()) {
-            confirmState = loadedConfirmState
+    // 优先复用首页预热的内存缓存（零 IO），使首帧即呈现真实状态，避免 InlineConfirm 按钮行 1~2 帧后坍缩跳动；
+    // 冷恢复（如进程重建直接进详情页）时走 IO 线程异步回填（保留 Medium-5）。
+    val cachedConfirm = remember(item.id) { PatternLearner.peekConfirmFlags(item.id)?.toDetailState() }
+    var confirmState by remember(item.id) { mutableStateOf(cachedConfirm ?: DetailConfirmState()) }
+    var confirmLoaded by remember(item.id) { mutableStateOf(cachedConfirm != null) }
+    LaunchedEffect(item.id) {
+        if (!confirmLoaded) {
+            val loaded = withContext(Dispatchers.IO) {
+                PatternLearner.loadConfirmFlags(ctx, item.id).toDetailState()
+            }
+            if (confirmState == DetailConfirmState()) {
+                confirmState = loaded
+            }
+            confirmLoaded = true
         }
     }
 
@@ -215,10 +227,16 @@ fun CodeDetailScreen(
                         }
                     })
 
-                // C2: 常用取件点提示（IO 线程查，避免组合期主线程解析 JSON）
-                val freqPoint by produceState<CommonStationStore.PickupPoint?>(null, item.pickupAddress) {
-                    val point = withContext(Dispatchers.IO) { CommonStationStore.isFrequentPickupPoint(ctx, item.pickupAddress) }
-                    value = point
+                // C2: 常用取件点提示（优先读首页预热的内存缓存，避免首帧缺席、1~2 帧后突然插入顶开下方布局）
+                val freqCacheReady = remember(item.pickupAddress) { CommonStationStore.isPickupPointsCacheReady() }
+                val cachedFreq = remember(item.pickupAddress) {
+                    if (freqCacheReady) CommonStationStore.peekFrequentPickupPoint(item.pickupAddress) else null
+                }
+                val freqPoint by produceState<CommonStationStore.PickupPoint?>(cachedFreq, item.pickupAddress) {
+                    if (!freqCacheReady) {
+                        val point = withContext(Dispatchers.IO) { CommonStationStore.isFrequentPickupPoint(ctx, item.pickupAddress) }
+                        value = point
+                    }
                 }
                 val freq = freqPoint  // 捕获局部值，便于智能转换
                 if (freq != null) {
@@ -280,57 +298,87 @@ fun CodeDetailScreen(
             }
 
             var showFullscreen by remember { mutableStateOf(false) }
-            if (item.screenshotPath.isNotBlank() && File(item.screenshotPath).exists()) {
-                var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-                // M3: 大图降采样解码，避免 4K 截图 BitmapFactory.decodeFile 直接 OOM
-                LaunchedEffect(item.screenshotPath) { bitmap = withContext(Dispatchers.IO) { decodeSampledBitmap(item.screenshotPath, 1600) } }
+            if (item.screenshotPath.isNotBlank()) {
+                val cachedAspect = remember(item.screenshotPath) { screenshotAspectCache.get(item.screenshotPath) }
+                val screenshotState by produceState(initialValue = ScreenshotLoadState(), item.screenshotPath) {
+                    val loaded = withContext(Dispatchers.IO) {
+                        if (!File(item.screenshotPath).exists()) {
+                            ScreenshotLoadState(exists = false, bitmap = null)
+                        } else {
+                            // M3: 大图降采样解码，避免 4K 截图 BitmapFactory.decodeFile 直接 OOM
+                            val bmp = decodeSampledBitmap(item.screenshotPath, 1600)
+                            if (bmp != null && bmp.height > 0) {
+                                screenshotAspectCache.put(item.screenshotPath, bmp.width.toFloat() / bmp.height.toFloat())
+                            }
+                            ScreenshotLoadState(exists = bmp != null, bitmap = bmp)
+                        }
+                    }
+                    value = loaded
+                }
                 // 不手动 recycle：Compose 的 Bitmap.asImageBitmap() 与状态共享受管理时，手动 recycle 可能造成
                 // 「已回收位图仍在绘制」崩溃（Canvas 绘制期 native 已释放）。交由 GC/Compose 生命周期管理。
-                Card(
-                    modifier = Modifier.fillMaxWidth().clickable { showFullscreen = true },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        IconText(R.drawable.ic_camera, "截屏（点击放大）",
-                            iconSize = 15.dp,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        bitmap?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "截屏",
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.FillWidth) }
-                        IconText(R.drawable.ic_pointer, "点击放大查看",
-                            iconSize = 13.dp,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp))
-                    }
-                }
-                if (showFullscreen) {
-                    // 无边框全屏预览：黑底 + 完整图片（含长宽比）居中，点任意处关闭
-                    androidx.compose.ui.window.Dialog(
-                        onDismissRequest = { showFullscreen = false },
-                        properties = androidx.compose.ui.window.DialogProperties(
-                            dismissOnBackPress = true,
-                            dismissOnClickOutside = true,
-                            usePlatformDefaultWidth = false  // 铺满全屏，去掉 AlertDialog 的默认宽度限制与卡片边框
-                        )
+                if (screenshotState.exists) {
+                    val bitmap = screenshotState.bitmap
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = bitmap != null) { showFullscreen = true },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black)
-                                .clickable { showFullscreen = false },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            bitmap?.let { bmp ->
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "截屏全屏",
-                                    modifier = Modifier.fillMaxSize().padding(12.dp),
-                                    contentScale = ContentScale.Fit
+                        Column(Modifier.padding(16.dp).animateContentSize()) {
+                            IconText(R.drawable.ic_camera, "截屏（点击放大）",
+                                iconSize = 15.dp,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(8.dp))
+                            if (bitmap != null) {
+                                Image(bitmap = bitmap.asImageBitmap(), contentDescription = "截屏",
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.FillWidth)
+                            } else {
+                                // 解码完成前先按缓存比例或默认高度占位，避免从 0dp 瞬间撑开推挤下方卡片
+                                val placeholderModifier = if (cachedAspect != null && cachedAspect > 0f) {
+                                    Modifier.fillMaxWidth().aspectRatio(cachedAspect)
+                                } else {
+                                    Modifier.fillMaxWidth().height(200.dp)
+                                }
+                                Box(
+                                    modifier = placeholderModifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                 )
+                            }
+                            IconText(R.drawable.ic_pointer, "点击放大查看",
+                                iconSize = 13.dp,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                    if (showFullscreen) {
+                        // 无边框全屏预览：黑底 + 完整图片（含长宽比）居中，点任意处关闭
+                        androidx.compose.ui.window.Dialog(
+                            onDismissRequest = { showFullscreen = false },
+                            properties = androidx.compose.ui.window.DialogProperties(
+                                dismissOnBackPress = true,
+                                dismissOnClickOutside = true,
+                                usePlatformDefaultWidth = false  // 铺满全屏，去掉 AlertDialog 的默认宽度限制与卡片边框
+                            )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black)
+                                    .clickable { showFullscreen = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                bitmap?.let { bmp ->
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "截屏全屏",
+                                        modifier = Modifier.fillMaxSize().padding(12.dp),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
                             }
                         }
                     }
