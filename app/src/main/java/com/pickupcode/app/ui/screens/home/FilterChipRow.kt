@@ -1,98 +1,197 @@
 package com.pickupcode.app.ui.screens.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pickupcode.app.ui.theme.TypeCoupon
-import com.pickupcode.app.ui.theme.TypeFood
-import com.pickupcode.app.ui.theme.TypeParcel
+import com.pickupcode.app.R
 
-/*
- * 筛选控件：Material 3 FilterChip（A 方案，扁平化，与 Sleek 主题统一）
- *   - 选中：主色填充 + 反白文字 + 对勾图标
- *   - 未选中：surface 浅底 + outlineVariant 描边 + 次级灰文字
- *   - 类型保留彩色圆点作助记（取餐蓝 / 取件紫 / 券码黄）
+/**
+ * 主页顶部单行筛选工具栏（方案 1）：
+ *  - 左侧：浅灰槽底 + 纯白圆角弹簧滑块分段控件（全部 / 取餐 / 取件 / 券码），无硬边框、无对勾跳宽
+ *  - 右侧：紧凑纯白胶囊切换按钮（按时间 / 按地址）
  */
-
 @Composable
-fun FilterChipRow(
+fun HomeFilterBar(
     currentFilter: String,
-    onFilterChange: (String) -> Unit
+    onFilterChange: (String) -> Unit,
+    groupMode: String,
+    onGroupModeChange: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val filters = listOf(
-        "all" to "全部",
-        "food" to "取餐",
-        "parcel" to "取件",
-        "coupon" to "券码"
-    )
+    val filters = remember {
+        listOf(
+            "all" to "全部",
+            "food" to "取餐",
+            "parcel" to "取件",
+            "coupon" to "券码"
+        )
+    }
+    val selectedIndex = filters.indexOfFirst { it.first == currentFilter }.coerceAtLeast(0)
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        filters.forEach { (key, label) ->
-            val selected = currentFilter == key
-            val tint = when (key) {
-                "food" -> TypeFood
-                "parcel" -> TypeParcel
-                "coupon" -> TypeCoupon
-                else -> Color.Unspecified
-            }
+        // 左侧：分段滑块筛选条
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                .padding(3.dp)
+        ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val segmentWidth = maxWidth / filters.size
+                val indicatorOffset by animateDpAsState(
+                    targetValue = segmentWidth * selectedIndex,
+                    animationSpec = spring(
+                        dampingRatio = 0.82f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "filter_pill_offset"
+                )
 
-            FilterChip(
-                selected = selected,
-                onClick = { onFilterChange(key) },
-                label = { Text(text = label, fontSize = 13.sp) },
-                leadingIcon = {
-                    // 紧凑：按状态实际显示（勾 16dp / 类型圆点 7dp / 空），不撑固定槽位
-                    if (selected) {
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                // 滑动纯白胶囊指示器
+                Box(
+                    modifier = Modifier
+                        .offset(x = indicatorOffset)
+                        .width(segmentWidth)
+                        .fillMaxHeight()
+                        .shadow(
+                            elevation = 1.dp,
+                            shape = RoundedCornerShape(9.5.dp),
+                            ambientColor = Color.Black.copy(alpha = 0.08f),
+                            spotColor = Color.Black.copy(alpha = 0.08f)
                         )
-                    } else if (tint != Color.Unspecified) {
+                        .clip(RoundedCornerShape(9.5.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                )
+
+                Row(modifier = Modifier.fillMaxSize()) {
+                    filters.forEach { (key, label) ->
+                        val selected = currentFilter == key
+                        val textColor by animateColorAsState(
+                            targetValue = if (selected) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            animationSpec = tween(160),
+                            label = "filter_text_color"
+                        )
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
-                                .background(tint, CircleShape)
-                        )
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(9.5.dp))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { onFilterChange(key) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = textColor,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
+                }
+            }
+        }
+
+        // 右侧：分组方式切换胶囊（点击在 按时间 / 按地址 间切换）
+        val isAddressMode = groupMode == "address"
+        val toggleTint by animateColorAsState(
+            targetValue = if (isAddressMode) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface,
+            animationSpec = tween(160),
+            label = "group_toggle_tint"
+        )
+        Surface(
+            onClick = { onGroupModeChange(if (isAddressMode) "time" else "address") },
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 0.5.dp,
+            modifier = Modifier.height(38.dp)
+        ) {
+            AnimatedContent(
+                targetState = isAddressMode,
+                transitionSpec = {
+                    (fadeIn(tween(150)) + slideInVertically(tween(150)) { it / 3 }) togetherWith
+                        (fadeOut(tween(110)) + slideOutVertically(tween(110)) { -it / 3 })
                 },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = selected,
-                    borderColor = MaterialTheme.colorScheme.outlineVariant,
-                    selectedBorderColor = MaterialTheme.colorScheme.primary
-                )
-            )
+                label = "group_mode_content"
+            ) { byAddress ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Image(
+                        painter = painterResource(if (byAddress) R.drawable.ic_map_pin else R.drawable.ic_timer),
+                        contentDescription = if (byAddress) "按地址分组" else "按时间分组",
+                        colorFilter = ColorFilter.tint(toggleTint),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (byAddress) "地址" else "时间",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = toggleTint,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
         }
     }
 }

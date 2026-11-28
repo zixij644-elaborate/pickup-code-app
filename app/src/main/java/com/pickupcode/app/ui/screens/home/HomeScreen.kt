@@ -212,17 +212,13 @@ fun HomeScreen(
                     .background(MaterialTheme.colorScheme.background),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-            // FilterChips
+            // 单行筛选栏：左侧分段滑块（全部/取餐/取件/券码）+ 右侧分组切换（按时间/按地址）
             item {
-                FilterChipRow(currentFilter = typeFilter, onFilterChange = { typeFilter = it })
-            }
-
-            // 分组方式切换（按时间 / 按地址聚合）
-            item {
-                GroupModeToggle(
-                    mode = groupMode,
-                    onModeChange = { groupMode = it },
-                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                HomeFilterBar(
+                    currentFilter = typeFilter,
+                    onFilterChange = { typeFilter = it },
+                    groupMode = groupMode,
+                    onGroupModeChange = { groupMode = it }
                 )
             }
 
