@@ -62,6 +62,7 @@ import android.util.Log
 import androidx.compose.ui.unit.sp
 import com.pickupcode.app.R
 import com.pickupcode.app.ui.components.IconText
+import com.pickupcode.app.ui.components.IdentityCodeTopBarActions
 import com.pickupcode.app.data.AppDatabase
 import com.pickupcode.app.data.CodeHistory
 import com.pickupcode.app.ui.theme.TypeCoupon
@@ -90,9 +91,7 @@ fun HomeScreen(
     onItemClick: (Long) -> Unit,
     onFabClick: () -> Unit,
     onTrashClick: () -> Unit,
-    onStatsClick: () -> Unit,
-    onDedupClick: () -> Unit,
-    onIdentityCodeClick: () -> Unit = {}
+    onDedupClick: () -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getInstance(context) }
@@ -173,42 +172,14 @@ fun HomeScreen(
                     Text("码上闪记", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 },
                 actions = {
-                    // 右上角四个动作图标：2026-09-18 用户指定换成附件里的线性图标（Lucide 风格），
-                    // 统一用 onSurface 上色（比默认的 onSurfaceVariant 更深）+ 20dp（用户反馈 24dp 偏大）
-                    // + 同一个 IconButton 热区。
-                    val actionTint = MaterialTheme.colorScheme.onSurface
-                    val iconModifier = Modifier.size(20.dp)
-                    // 取件时最常用的动作放在最前面：一键打开身份码
-                    IconButton(onClick = onIdentityCodeClick) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_action_qr_code),
-                            contentDescription = "身份码",
-                            colorFilter = ColorFilter.tint(actionTint),
-                            modifier = iconModifier
-                        )
-                    }
-                    IconButton(onClick = onStatsClick) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_action_info),
-                            contentDescription = "统计",
-                            colorFilter = ColorFilter.tint(actionTint),
-                            modifier = iconModifier
-                        )
-                    }
-                    IconButton(onClick = onTrashClick) {
-                        Image(
-                            painter = painterResource(R.drawable.ic_action_trash),
-                            contentDescription = "回收站",
-                            colorFilter = ColorFilter.tint(actionTint),
-                            modifier = iconModifier
-                        )
-                    }
+                    // 身份码直达按钮（淘宝 / 菜鸟 / 拼多多）+ 设置；识别统计在设置页内，回收站在列表提示卡进入
+                    IdentityCodeTopBarActions()
                     IconButton(onClick = onSettingsClick) {
                         Image(
                             painter = painterResource(R.drawable.ic_action_list),
                             contentDescription = "设置",
-                            colorFilter = ColorFilter.tint(actionTint),
-                            modifier = iconModifier
+                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 },

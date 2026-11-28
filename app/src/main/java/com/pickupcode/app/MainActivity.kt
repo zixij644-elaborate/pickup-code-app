@@ -146,9 +146,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onFabClick = { showManualDialog = true },
                         onTrashClick = { currentScreen = Screen.Trash.name },
-                        onStatsClick = { currentScreen = Screen.Stats.name },
-                        onDedupClick = { currentScreen = Screen.Dedup.name },
-                        onIdentityCodeClick = { currentScreen = Screen.IdentityCode.name }
+                        onDedupClick = { currentScreen = Screen.Dedup.name }
                     )
                     Screen.Settings -> SettingsScreen(
                         onBack = { currentScreen = Screen.Home.name },

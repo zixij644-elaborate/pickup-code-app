@@ -7,7 +7,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
@@ -17,6 +18,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.pickupcode.app.R
 import com.pickupcode.app.util.IdentityCodeLauncher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 标题栏用的「身份码」跳转按钮组：**三家分开、各带自家单色图标**。
@@ -33,13 +36,23 @@ fun IdentityCodeTopBarActions() {
     val context = LocalContext.current
     // 颜色比 TopAppBar 默认的 onSurfaceVariant 更深（用户 2026-09-18：「logo 颜色再深一点」）
     val tint = MaterialTheme.colorScheme.onSurface
-    // 安装状态只在进入页面时读一次（需要 AndroidManifest 里的 <queries> 才查得到）
-    val installed = remember {
-        mapOf(
-            IdentityCodeLauncher.TAOBAO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.TAOBAO),
-            IdentityCodeLauncher.CAINIAO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.CAINIAO),
-            IdentityCodeLauncher.PINDUODUO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.PINDUODUO)
-        )
+    // 安装状态异步在 IO 线程读取，避免放主页顶栏后在冷启动首帧做 3 次同步 PackageManager Binder IPC
+    val installed by produceState(
+        initialValue = mapOf(
+            IdentityCodeLauncher.TAOBAO to true,
+            IdentityCodeLauncher.CAINIAO to true,
+            IdentityCodeLauncher.PINDUODUO to true
+        ),
+        context
+    ) {
+        val checked = withContext(Dispatchers.IO) {
+            mapOf(
+                IdentityCodeLauncher.TAOBAO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.TAOBAO),
+                IdentityCodeLauncher.CAINIAO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.CAINIAO),
+                IdentityCodeLauncher.PINDUODUO to IdentityCodeLauncher.isInstalled(context, IdentityCodeLauncher.PINDUODUO)
+            )
+        }
+        value = checked
     }
 
     fun open(block: (android.content.Context) -> IdentityCodeLauncher.Result) {
