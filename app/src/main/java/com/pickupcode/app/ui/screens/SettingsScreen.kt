@@ -16,35 +16,49 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -73,7 +87,8 @@ private enum class SettingsPage(val title: String) {
     STATS("识别统计与自学习")
 }
 
-/** 各 section 共享的上下文，避免每个私有 Composable 传一堆参数 */
+/** 各 section 共享的上下文，避免每个私有 Composable 传一堆参数；@Stable 帮助 Compose 跳过未变分组重组 */
+@Stable
 private data class SettingsCtx(
     val ctx: Context,
     val scope: CoroutineScope,
@@ -272,140 +287,153 @@ private fun SettingsMainContent(
         }.ifEmpty { listOf("已关闭") }.joinToString(" · ")
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+    val notifStatus = rememberNotificationStatus(sc.ctx)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // 仅在权限/渠道异常时置顶提示
-        NotificationStatusCard(sc)
-
-        // 1. 常用管理（无组标题置顶卡，快速直达规则、地址与统计）
-        SettingsListCard {
-            SettingsNavRow(
-                title = "识别规则",
-                icon = R.drawable.ic_wrench,
-                onClick = onRulesClick
-            )
-            SettingsListDivider()
-            SettingsNavRow(
-                title = "常用取件地址",
-                icon = R.drawable.ic_map_pin,
-                onClick = onSavedAddressClick
-            )
-            SettingsListDivider()
-            SettingsNavRow(
-                title = "识别统计与自学习",
-                icon = R.drawable.ic_bar_chart_3,
-                onClick = onOpenStats
-            )
+        // 仅在权限/渠道异常时置顶提示（正常时不占位，避免顶部多出 spacedBy 空白）
+        if (notifStatus.first != NotifStatus.OK) {
+            item(key = "notif_status") {
+                NotificationStatusCard(sc.ctx, notifStatus.first, notifStatus.second)
+            }
         }
 
-        // 2. 设置
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SettingsGroupHeader("设置")
+        // 识别灵敏度置顶
+        item(key = "confidence") {
+            SettingsGroupCard {
+                ConfidenceSliderRow(sc)
+            }
+        }
+
+        // 1. 常用管理（无组标题置顶卡，快速直达规则、地址与统计）
+        item(key = "quick_manage") {
             SettingsListCard {
-                ThemePickerRow(sc)
-                SettingsListDivider()
                 SettingsNavRow(
-                    title = "识别范围",
-                    icon = R.drawable.ic_search,
-                    trailingText = recognitionSummary,
-                    onClick = onOpenRecognition
-                )
-                SettingsListDivider()
-                Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                    ConfidenceSliderRow(sc)
-                }
-                SettingsListDivider()
-                SettingsNavRow(
-                    title = "来源与提醒",
-                    icon = R.drawable.ic_bell,
-                    onClick = onOpenSourceRemind
+                    title = "识别规则",
+                    icon = R.drawable.ic_wrench,
+                    onClick = onRulesClick
                 )
                 SettingsListDivider()
                 SettingsNavRow(
-                    title = "AI 识别与接口",
-                    icon = R.drawable.ic_bot,
-                    trailingText = aiSummary,
-                    onClick = onOpenAiConfig
+                    title = "常用取件地址",
+                    icon = R.drawable.ic_map_pin,
+                    onClick = onSavedAddressClick
                 )
                 SettingsListDivider()
                 SettingsNavRow(
-                    title = "第三方验证",
-                    icon = R.drawable.ic_map,
-                    trailingText = verifySummary,
-                    onClick = onOpenVerifyConfig
+                    title = "识别统计与自学习",
+                    icon = R.drawable.ic_bar_chart_3,
+                    onClick = onOpenStats
                 )
             }
         }
 
-        // 3. 其他
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SettingsGroupHeader("其他")
-            SettingsListCard {
-                SettingsNavRow(
-                    title = "检查更新",
-                    icon = R.drawable.ic_refresh_cw,
-                    trailingText = when {
-                        checking -> "检查中…"
-                        upStatus != null -> upStatus
-                        else -> "v${BuildConfig.VERSION_NAME}"
-                    },
-                    enabled = !checking,
-                    onClick = {
-                        checking = true
-                        sc.scope.launch {
-                            val result = checkUpdate()
-                            upStatus = result
-                            if (result.startsWith("检查失败")) {
-                                Toast.makeText(sc.ctx, result, Toast.LENGTH_SHORT).show()
-                            }
-                            checking = false
-                        }
-                    }
-                )
-                if (BuildConfig.DEBUG) {
+        // 2. 设置
+        item(key = "settings_group") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsGroupHeader("设置")
+                SettingsListCard {
+                    ThemePickerRow(sc)
                     SettingsListDivider()
                     SettingsNavRow(
-                        title = "识别调试",
-                        icon = R.drawable.ic_action_info,
-                        onClick = { showDebug = true }
+                        title = "识别范围",
+                        icon = R.drawable.ic_search,
+                        trailingText = recognitionSummary,
+                        onClick = onOpenRecognition
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "来源与提醒",
+                        icon = R.drawable.ic_bell,
+                        onClick = onOpenSourceRemind
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "AI 识别与接口",
+                        icon = R.drawable.ic_bot,
+                        trailingText = aiSummary,
+                        onClick = onOpenAiConfig
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "第三方验证",
+                        icon = R.drawable.ic_map,
+                        trailingText = verifySummary,
+                        onClick = onOpenVerifyConfig
                     )
                 }
             }
         }
 
-        // 底部版本说明与开源链接
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = "码上闪记 v${BuildConfig.VERSION_NAME}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "基于 ML Kit OCR · 数据仅存储在本地",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "https://github.com/zixij644-elaborate/pickup-code-app",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
-                    .padding(vertical = 2.dp)
-            )
+        // 3. 其他
+        item(key = "other_group") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsGroupHeader("其他")
+                SettingsListCard {
+                    SettingsNavRow(
+                        title = "检查更新",
+                        icon = R.drawable.ic_refresh_cw,
+                        trailingText = when {
+                            checking -> "检查中…"
+                            upStatus != null -> upStatus
+                            else -> "v${BuildConfig.VERSION_NAME}"
+                        },
+                        enabled = !checking,
+                        onClick = {
+                            checking = true
+                            sc.scope.launch {
+                                val result = checkUpdate()
+                                upStatus = result
+                                if (result.startsWith("检查失败")) {
+                                    Toast.makeText(sc.ctx, result, Toast.LENGTH_SHORT).show()
+                                }
+                                checking = false
+                            }
+                        }
+                    )
+                    if (BuildConfig.DEBUG) {
+                        SettingsListDivider()
+                        SettingsNavRow(
+                            title = "识别调试",
+                            icon = R.drawable.ic_action_info,
+                            onClick = { showDebug = true }
+                        )
+                    }
+                }
+            }
         }
 
-        Spacer(Modifier.height(12.dp))
+        // 底部版本说明与开源链接
+        item(key = "footer") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "码上闪记 v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "基于 ML Kit OCR · 数据仅存储在本地",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "https://github.com/zixij644-elaborate/pickup-code-app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
+                        .padding(vertical = 2.dp)
+                )
+            }
+        }
     }
 
     if (showDebug) {
@@ -424,31 +452,28 @@ private fun RecognitionSubPage(sc: SettingsCtx) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SettingsGroupHeader("识别类型")
-            SettingsGroupCard {
-                SettingsSwitch(
-                    "取餐码",
-                    icon = R.drawable.ic_cup_soda,
-                    checked = sc.s.enableFoodCodes,
-                    onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) }
-                )
-                SettingsDivider()
-                SettingsSwitch(
-                    "取件码",
-                    icon = R.drawable.ic_package,
-                    checked = sc.s.enableParcelCodes,
-                    onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) }
-                )
-                SettingsDivider()
-                SettingsSwitch(
-                    "券码",
-                    icon = R.drawable.ic_ticket,
-                    sub = "识别屏幕/图片中的二维码（识别到则只标券码）",
-                    checked = sc.s.enableCouponCodes,
-                    onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
-                )
-            }
+        SettingsGroupCard {
+            SettingsSwitch(
+                "取餐码",
+                icon = R.drawable.ic_cup_soda,
+                checked = sc.s.enableFoodCodes,
+                onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) }
+            )
+            SettingsDivider()
+            SettingsSwitch(
+                "取件码",
+                icon = R.drawable.ic_package,
+                checked = sc.s.enableParcelCodes,
+                onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) }
+            )
+            SettingsDivider()
+            SettingsSwitch(
+                "券码",
+                icon = R.drawable.ic_ticket,
+                sub = "识别屏幕/图片中的二维码（识别到则只标券码）",
+                checked = sc.s.enableCouponCodes,
+                onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
+            )
         }
     }
 }
@@ -869,45 +894,61 @@ private fun SettingsNavRow(
     }
 }
 
-/** FlClash 风格单行选择器：右侧显示当前值 + 上下箭头，点击弹出轻量菜单 */
+/**
+ * FlClash（prism_ui）同款单行选择器：
+ * - 点击整行从右侧值位置（overAnchorEnd）弹性展开纯白/深色浮层；
+ * - 展开弹簧沿用 prism_ui 的 stiffness=400f, dampingRatio=0.754f（带轻微过冲回弹）；
+ * - 同步胶囊圆角形变 + Android 12+ 内容轻微模糊淡入；收起时缩回右侧值后再切换文字。
+ */
 @Composable
 private fun ThemePickerRow(sc: SettingsCtx) {
-    var expanded by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
     val options = remember {
         listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色")
     }
     val currentLabel = options.firstOrNull { it.first == sc.s.darkMode }?.second ?: "跟随系统"
 
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true }
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_lightbulb),
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = "外观主题",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showMenu = true }
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_lightbulb),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = "外观主题",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        // Popup 锚定在右侧值控件上，与 FlClash 的 PopupAnchor(overAnchorEnd) 一致
+        Box {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text(
-                    text = currentLabel,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                AnimatedContent(
+                    targetState = currentLabel,
+                    transitionSpec = {
+                        (fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 }) togetherWith
+                            (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 3 })
+                    },
+                    label = "theme_value_text"
+                ) { label ->
+                    Text(
+                        text = label,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Icon(
                     imageVector = Icons.Rounded.UnfoldMore,
                     contentDescription = null,
@@ -915,26 +956,122 @@ private fun ThemePickerRow(sc: SettingsCtx) {
                     modifier = Modifier.size(18.dp)
                 )
             }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            options.forEach { (value, label) ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = label,
-                            fontWeight = if (sc.s.darkMode == value) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (sc.s.darkMode == value) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface
+
+            if (showMenu) {
+                val progress = remember { Animatable(0f) }
+                val popupScope = rememberCoroutineScope()
+                var dismissing by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    progress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.754f,
+                            stiffness = 400f
                         )
-                    },
-                    onClick = {
-                        expanded = false
-                        sc.saveRun { AppPreferences.setDarkMode(sc.ctx, value) }
+                    )
+                }
+
+                fun dismissWith(pickedValue: String?) {
+                    if (dismissing) return
+                    dismissing = true
+                    popupScope.launch {
+                        progress.animateTo(
+                            targetValue = 0f,
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        )
+                        showMenu = false
+                        if (pickedValue != null && pickedValue != sc.s.darkMode) {
+                            sc.saveRun { AppPreferences.setDarkMode(sc.ctx, pickedValue) }
+                        }
                     }
-                )
+                }
+
+                val p = progress.value
+                val pClamped = p.coerceIn(0f, 1f)
+                val sx = 0.45f + (1f - 0.45f) * p
+                val sy = 0.28f + (1f - 0.28f) * p
+                val surfaceAlpha = (p * 2.4f).coerceIn(0f, 1f)
+                val contentAlpha = ((p - 0.14f) / 0.65f).coerceIn(0f, 1f)
+                val cornerDp = (26f - 8f * pClamped).dp
+                val blurDp = ((1f - pClamped) * 4f).coerceAtLeast(0f).dp
+
+                Popup(
+                    alignment = Alignment.TopEnd,
+                    offset = IntOffset(
+                        x = with(density) { 8.dp.roundToPx() },
+                        y = with(density) { (-6).dp.roundToPx() }
+                    ),
+                    onDismissRequest = { dismissWith(null) },
+                    properties = PopupProperties(focusable = true)
+                ) {
+                    // 给弹簧过冲留出轻微裁切安全边距，避免阴影被 Popup 窗口边缘切掉
+                    Box(modifier = Modifier.padding(12.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(cornerDp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp,
+                            shadowElevation = (10f * pClamped).dp,
+                            border = BorderStroke(
+                                0.5.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f * pClamped)
+                            ),
+                            modifier = Modifier
+                                .width(160.dp)
+                                .graphicsLayer {
+                                    scaleX = sx
+                                    scaleY = sy
+                                    alpha = surfaceAlpha
+                                    transformOrigin = TransformOrigin(0.92f, 0.12f)
+                                }
+                        ) {
+                            val contentMod = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.1.dp) {
+                                Modifier
+                                    .padding(vertical = 6.dp)
+                                    .blur(blurDp)
+                                    .graphicsLayer { alpha = contentAlpha }
+                            } else {
+                                Modifier
+                                    .padding(vertical = 6.dp)
+                                    .graphicsLayer { alpha = contentAlpha }
+                            }
+                            Column(modifier = contentMod) {
+                                options.forEach { (value, label) ->
+                                    val selected = sc.s.darkMode == value
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { dismissWith(value) }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.size(18.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (selected) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = label,
+                                            fontSize = 15.sp,
+                                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                            color = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1071,8 +1208,7 @@ private fun openNotificationSettings(ctx: Context) {
 }
 
 @Composable
-private fun NotificationStatusCard(sc: SettingsCtx) {
-    val ctx = sc.ctx
+private fun rememberNotificationStatus(ctx: Context): Pair<NotifStatus, String> {
     val lifecycleOwner = LocalLifecycleOwner.current
     var refreshTick by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycleOwner) {
@@ -1082,7 +1218,14 @@ private fun NotificationStatusCard(sc: SettingsCtx) {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    val (status, desc) = remember(refreshTick) { computeNotificationStatus(ctx) }
+    val statusState by produceState(initialValue = NotifStatus.OK to "", ctx, refreshTick) {
+        value = withContext(Dispatchers.IO) { computeNotificationStatus(ctx) }
+    }
+    return statusState
+}
+
+@Composable
+private fun NotificationStatusCard(ctx: Context, status: NotifStatus, desc: String) {
     if (status == NotifStatus.OK) return
 
     val isError = status == NotifStatus.DISABLED
