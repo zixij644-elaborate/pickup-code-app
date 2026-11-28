@@ -21,6 +21,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -28,13 +29,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -58,9 +63,11 @@ import kotlin.math.roundToInt
 
 private const val TAG = "SettingsScreen"
 
-/** 设置页内部层级：主页只做高频偏好与导航，低频 Key/统计进二级子页 */
+/** 设置页内部层级：主页做极简目录卡片（参考 FlClash），详细开关/Key/统计进二级子页 */
 private enum class SettingsPage(val title: String) {
     MAIN("设置"),
+    RECOGNITION("识别范围"),
+    SOURCE_REMIND("来源与提醒"),
     AI_CONFIG("AI 识别与接口"),
     VERIFY_CONFIG("第三方验证"),
     STATS("识别统计与自学习")
@@ -213,10 +220,14 @@ fun SettingsScreen(
                     sc = sc,
                     onRulesClick = onRulesClick,
                     onSavedAddressClick = onSavedAddressClick,
+                    onOpenRecognition = { currentPage = SettingsPage.RECOGNITION },
+                    onOpenSourceRemind = { currentPage = SettingsPage.SOURCE_REMIND },
                     onOpenAiConfig = { currentPage = SettingsPage.AI_CONFIG },
                     onOpenVerifyConfig = { currentPage = SettingsPage.VERIFY_CONFIG },
                     onOpenStats = { currentPage = SettingsPage.STATS }
                 )
+                SettingsPage.RECOGNITION -> RecognitionSubPage(sc)
+                SettingsPage.SOURCE_REMIND -> SourceRemindSubPage(sc)
                 SettingsPage.AI_CONFIG -> AiConfigSubPage(sc)
                 SettingsPage.VERIFY_CONFIG -> VerifyConfigSubPage(sc)
                 SettingsPage.STATS -> StatsSubPage(sc, onStatsClick)
@@ -225,161 +236,299 @@ fun SettingsScreen(
     }
 }
 
-/* ═══════════════════ 主设置页（Material 3 分组列表） ═══════════════════ */
+/* ═══════════════════ 主设置页（极简大圆角分组卡片） ═══════════════════ */
 
 @Composable
 private fun SettingsMainContent(
     sc: SettingsCtx,
     onRulesClick: () -> Unit,
     onSavedAddressClick: () -> Unit,
+    onOpenRecognition: () -> Unit,
+    onOpenSourceRemind: () -> Unit,
     onOpenAiConfig: () -> Unit,
     onOpenVerifyConfig: () -> Unit,
     onOpenStats: () -> Unit
 ) {
-    val aiSummary = remember(sc.s.enableAI, sc.s.apiKey, sc.s.apiModel) {
+    val uriHandler = LocalUriHandler.current
+    var upStatus by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var showDebug by remember { mutableStateOf(false) }
+
+    val aiSummary = remember(sc.s.enableAI, sc.s.apiKey) {
         when {
-            !sc.s.enableAI && sc.s.apiKey.isNotBlank() -> "已配 Key（未启用）"
+            !sc.s.enableAI && sc.s.apiKey.isNotBlank() -> "未启用"
             !sc.s.enableAI -> "未启用"
-            sc.s.apiKey.isBlank() -> "已开启 · 未填 Key"
-            else -> "已开启 · ${sc.s.apiModel.ifBlank { "默认模型" }}"
+            sc.s.apiKey.isBlank() -> "未填 Key"
+            else -> "已开启"
         }
     }
     val verifyCount = (if (sc.s.enableMapVerify) 1 else 0) + (if (sc.s.enableKuaidi100) 1 else 0)
     val verifySummary = if (verifyCount == 0) "未启用" else "已启用 $verifyCount 项"
+    val recognitionSummary = remember(sc.s.enableFoodCodes, sc.s.enableParcelCodes, sc.s.enableCouponCodes) {
+        buildList {
+            if (sc.s.enableFoodCodes) add("取餐")
+            if (sc.s.enableParcelCodes) add("取件")
+            if (sc.s.enableCouponCodes) add("券码")
+        }.ifEmpty { listOf("已关闭") }.joinToString(" · ")
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // 仅在权限/渠道异常时置顶提示
         NotificationStatusCard(sc)
 
-        // 1. 识别与规则
-        SettingsGroupHeader("识别与规则")
-        SettingsGroupCard {
-            ConfidenceSliderRow(sc)
-            SettingsDivider()
-            SettingsSwitch(
-                "取餐码",
-                icon = R.drawable.ic_cup_soda,
-                checked = sc.s.enableFoodCodes,
-                onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) }
-            )
-            SettingsDivider()
-            SettingsSwitch(
-                "取件码",
-                icon = R.drawable.ic_package,
-                checked = sc.s.enableParcelCodes,
-                onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) }
-            )
-            SettingsDivider()
-            SettingsSwitch(
-                "券码",
-                icon = R.drawable.ic_ticket,
-                sub = "识别屏幕/图片中的二维码（识别到则只标券码）",
-                checked = sc.s.enableCouponCodes,
-                onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
-            )
-            SettingsDivider()
+        // 1. 常用管理（无组标题置顶卡，快速直达规则、地址与统计）
+        SettingsListCard {
             SettingsNavRow(
                 title = "识别规则",
-                subtitle = "查看、停用或自定义正则；改坏可一键还原",
+                icon = R.drawable.ic_wrench,
                 onClick = onRulesClick
             )
-            SettingsDivider()
+            SettingsListDivider()
             SettingsNavRow(
                 title = "常用取件地址",
-                subtitle = "预存常去驿站/快递柜，识别时优先采用",
+                icon = R.drawable.ic_map_pin,
                 onClick = onSavedAddressClick
             )
-        }
-
-        // 2. 来源与提醒
-        SettingsGroupHeader("来源与提醒")
-        SettingsGroupCard {
-            SettingsSwitch(
-                "Intent 接收",
-                icon = R.drawable.ic_link,
-                sub = "接收来自其他 App 的分享（文本/图片）",
-                checked = sc.s.enableIntentReceive,
-                onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) }
-            )
-            SettingsDivider()
-            SettingsSwitch(
-                "分享识别",
-                icon = R.drawable.ic_upload,
-                sub = "文本选择菜单/拖放直达时自动识别",
-                checked = sc.s.enableShareDetection,
-                onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) }
-            )
-            SettingsDivider()
-            SettingsSwitch(
-                "短信取件码自动识别",
-                icon = R.drawable.ic_send,
-                sub = if (sc.s.enableSmsReceive) "已开启" else "已关闭",
-                checked = sc.s.enableSmsReceive,
-                onChange = sc.onSmsEnable
-            )
-            SettingsDivider()
-            SettingsSwitch(
-                "快递取件码到期提醒",
-                icon = R.drawable.ic_hourglass,
-                sub = if (sc.s.enableExpiryRemind) "存放 3 天或文本时限到达时提醒" else "已关闭",
-                checked = sc.s.enableExpiryRemind,
-                onChange = sc.save { AppPreferences.setEnableExpiryRemind(sc.ctx, it) }
-            )
-            SettingsDivider()
-            SettingsNavRow(
-                title = "在主页重新显示无障碍提示",
-                subtitle = if (sc.s.hideAccessibilityCard) "点击恢复主页顶部的无障碍引导卡片" else "主页当前已显示无障碍提示",
-                enabled = sc.s.hideAccessibilityCard,
-                showArrow = false,
-                onClick = { sc.saveRun { AppPreferences.setHideAccessibilityCard(sc.ctx, false) } }
-            )
-        }
-
-        // 3. 联网增强（低频 Key 与自检进子页）
-        SettingsGroupHeader("联网增强（可选）")
-        SettingsGroupCard {
-            SettingsNavRow(
-                title = "AI 识别与接口配置",
-                icon = R.drawable.ic_bot,
-                subtitle = "使用视觉/文本大模型补充复杂截图识别",
-                trailingText = aiSummary,
-                onClick = onOpenAiConfig
-            )
-            SettingsDivider()
-            SettingsNavRow(
-                title = "地图与快递100验证",
-                icon = R.drawable.ic_map,
-                subtitle = "校验地址坐标或通过单号反查标准答案",
-                trailingText = verifySummary,
-                onClick = onOpenVerifyConfig
-            )
-        }
-
-        // 4. 外观、数据与关于
-        SettingsGroupHeader("通用与数据")
-        SettingsGroupCard {
-            AppearanceRow(sc)
-            SettingsDivider()
+            SettingsListDivider()
             SettingsNavRow(
                 title = "识别统计与自学习",
-                subtitle = "查看命中率、候选模式及清理未匹配样本",
+                icon = R.drawable.ic_bar_chart_3,
                 onClick = onOpenStats
             )
-            SettingsDivider()
-            AboutBlock(sc)
+        }
+
+        // 2. 设置
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("设置")
+            SettingsListCard {
+                ThemePickerRow(sc)
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "识别范围",
+                    icon = R.drawable.ic_search,
+                    trailingText = recognitionSummary,
+                    onClick = onOpenRecognition
+                )
+                SettingsListDivider()
+                Box(modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+                    ConfidenceSliderRow(sc)
+                }
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "来源与提醒",
+                    icon = R.drawable.ic_bell,
+                    onClick = onOpenSourceRemind
+                )
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "AI 识别与接口",
+                    icon = R.drawable.ic_bot,
+                    trailingText = aiSummary,
+                    onClick = onOpenAiConfig
+                )
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "第三方验证",
+                    icon = R.drawable.ic_map,
+                    trailingText = verifySummary,
+                    onClick = onOpenVerifyConfig
+                )
+            }
+        }
+
+        // 3. 其他
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("其他")
+            SettingsListCard {
+                SettingsNavRow(
+                    title = "检查更新",
+                    icon = R.drawable.ic_refresh_cw,
+                    trailingText = when {
+                        checking -> "检查中…"
+                        upStatus != null -> upStatus
+                        else -> "v${BuildConfig.VERSION_NAME}"
+                    },
+                    enabled = !checking,
+                    onClick = {
+                        checking = true
+                        sc.scope.launch {
+                            val result = checkUpdate()
+                            upStatus = result
+                            if (result.startsWith("检查失败")) {
+                                Toast.makeText(sc.ctx, result, Toast.LENGTH_SHORT).show()
+                            }
+                            checking = false
+                        }
+                    }
+                )
+                if (BuildConfig.DEBUG) {
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "识别调试",
+                        icon = R.drawable.ic_action_info,
+                        onClick = { showDebug = true }
+                    )
+                }
+            }
+        }
+
+        // 底部版本说明与开源链接
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "码上闪记 v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "基于 ML Kit OCR · 数据仅存储在本地",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "https://github.com/zixij644-elaborate/pickup-code-app",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
+                    .padding(vertical = 2.dp)
+            )
         }
 
         Spacer(Modifier.height(12.dp))
     }
+
+    if (showDebug) {
+        RecognitionDebugDialog(onDismiss = { showDebug = false })
+    }
 }
 
 /* ═══════════════════ 二级子页 ═══════════════════ */
+
+@Composable
+private fun RecognitionSubPage(sc: SettingsCtx) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("识别类型")
+            SettingsGroupCard {
+                SettingsSwitch(
+                    "取餐码",
+                    icon = R.drawable.ic_cup_soda,
+                    checked = sc.s.enableFoodCodes,
+                    onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "取件码",
+                    icon = R.drawable.ic_package,
+                    checked = sc.s.enableParcelCodes,
+                    onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "券码",
+                    icon = R.drawable.ic_ticket,
+                    sub = "识别屏幕/图片中的二维码（识别到则只标券码）",
+                    checked = sc.s.enableCouponCodes,
+                    onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceRemindSubPage(sc: SettingsCtx) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("自动获取")
+            SettingsGroupCard {
+                SettingsSwitch(
+                    "Intent 接收",
+                    icon = R.drawable.ic_link,
+                    sub = "接收来自其他 App 的分享（文本/图片）",
+                    checked = sc.s.enableIntentReceive,
+                    onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "分享识别",
+                    icon = R.drawable.ic_upload,
+                    sub = "文本选择菜单/拖放直达时自动识别",
+                    checked = sc.s.enableShareDetection,
+                    onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "短信取件码自动识别",
+                    icon = R.drawable.ic_send,
+                    sub = if (sc.s.enableSmsReceive) "已开启" else "已关闭",
+                    checked = sc.s.enableSmsReceive,
+                    onChange = sc.onSmsEnable
+                )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("提醒与引导")
+            SettingsGroupCard {
+                SettingsSwitch(
+                    "快递取件码到期提醒",
+                    icon = R.drawable.ic_hourglass,
+                    sub = if (sc.s.enableExpiryRemind) "存放 3 天或文本时限到达时提醒" else "已关闭",
+                    checked = sc.s.enableExpiryRemind,
+                    onChange = sc.save { AppPreferences.setEnableExpiryRemind(sc.ctx, it) }
+                )
+                SettingsDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = sc.s.hideAccessibilityCard) {
+                            sc.saveRun { AppPreferences.setHideAccessibilityCard(sc.ctx, false) }
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "在主页重新显示无障碍提示",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (sc.s.hideAccessibilityCard) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                        )
+                        Text(
+                            if (sc.s.hideAccessibilityCard) "点击恢复主页顶部的无障碍引导卡片" else "主页当前已显示无障碍提示",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun AiConfigSubPage(sc: SettingsCtx) {
@@ -606,48 +755,71 @@ private fun StatsSubPage(sc: SettingsCtx, onStatsClick: () -> Unit) {
     }
 }
 
-/* ═══════════════════ 公共组件（Material 3 分组列表风格） ═══════════════════ */
+/* ═══════════════════ 公共组件（FlClash 极简大圆角分组卡片） ═══════════════════ */
 
 @Composable
 private fun SettingsGroupHeader(title: String) {
     Text(
         text = title,
-        fontSize = 13.sp,
+        fontSize = 14.sp,
         fontWeight = FontWeight.Medium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+        modifier = Modifier.padding(start = 12.dp)
     )
 }
 
+/** 列表目录卡片：无内边距与描边，点击涟漪铺满整行，靠浅灰底与纯白表面自然分层 */
+@Composable
+private fun SettingsListCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+/** 表单/开关分组卡片（二级子页使用，保持统一大圆角与纯白无描边风格） */
 @Composable
 private fun SettingsGroupCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             content = content
         )
     }
 }
 
 @Composable
+private fun SettingsListDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 18.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    )
+}
+
+@Composable
 private fun SettingsDivider() {
     HorizontalDivider(
         thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
     )
 }
 
 @Composable
 private fun SettingsNavRow(
     title: String,
-    subtitle: String? = null,
     @DrawableRes icon: Int? = null,
     trailingText: String? = null,
     enabled: Boolean = true,
@@ -661,43 +833,109 @@ private fun SettingsNavRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 2.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (icon != null) {
-                com.pickupcode.app.ui.components.IconText(
-                    icon = icon,
-                    text = title,
-                    iconSize = 17.dp,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = titleColor
-                )
-            } else {
-                Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor)
-            }
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        if (icon != null) {
+            Image(
+                painter = painterResource(icon),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.size(20.dp)
+            )
         }
+        Text(
+            text = title,
+            fontSize = 16.sp,
+            color = titleColor,
+            modifier = Modifier.weight(1f)
+        )
         if (trailingText != null) {
             Text(
-                trailingText,
-                style = MaterialTheme.typography.bodySmall,
+                text = trailingText,
+                fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         if (showArrow) {
-            Text(
-                "›",
-                fontSize = 20.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(20.dp)
             )
+        }
+    }
+}
+
+/** FlClash 风格单行选择器：右侧显示当前值 + 上下箭头，点击弹出轻量菜单 */
+@Composable
+private fun ThemePickerRow(sc: SettingsCtx) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = remember {
+        listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色")
+    }
+    val currentLabel = options.firstOrNull { it.first == sc.s.darkMode }?.second ?: "跟随系统"
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_lightbulb),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = "外观主题",
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = currentLabel,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = Icons.Rounded.UnfoldMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = label,
+                            fontWeight = if (sc.s.darkMode == value) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (sc.s.darkMode == value) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        sc.saveRun { AppPreferences.setDarkMode(sc.ctx, value) }
+                    }
+                )
+            }
         }
     }
 }
@@ -777,94 +1015,6 @@ private fun ConfidenceSliderRow(sc: SettingsCtx) {
                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
-    }
-}
-
-@Composable
-private fun AppearanceRow(sc: SettingsCtx) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("外观主题", style = MaterialTheme.typography.bodyLarge)
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEachIndexed { i, (v, l) ->
-                SegmentedButton(
-                    selected = sc.s.darkMode == v,
-                    onClick = { sc.saveRun { AppPreferences.setDarkMode(sc.ctx, v) } },
-                    shape = SegmentedButtonDefaults.itemShape(i, 3),
-                    colors = SegmentedButtonDefaults.colors(
-                        activeContainerColor = MaterialTheme.colorScheme.primary,
-                        activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                        inactiveContainerColor = MaterialTheme.colorScheme.surface,
-                        inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) { Text(l) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AboutBlock(sc: SettingsCtx) {
-    val uriHandler = LocalUriHandler.current
-    var upStatus by remember { mutableStateOf<String?>(null) }
-    var checking by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("码上闪记 v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "基于 ML Kit OCR · 数据仅存储在本地",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            TextButton(
-                enabled = !checking,
-                onClick = {
-                    checking = true
-                    sc.scope.launch {
-                        val result = checkUpdate()
-                        upStatus = result
-                        if (result.startsWith("检查失败")) Toast.makeText(sc.ctx, result, Toast.LENGTH_SHORT).show()
-                        checking = false
-                    }
-                }
-            ) {
-                Text(if (checking) "检查中..." else "检查更新", color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        upStatus?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(
-                "GitHub 开源仓库",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
-                    .padding(vertical = 2.dp)
-            )
-            // 识别调试面板：仅 DEBUG 构建显示（生产裁剪）
-            if (BuildConfig.DEBUG) {
-                var showDebug by remember { mutableStateOf(false) }
-                Text(
-                    "识别调试",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clickable { showDebug = true }
-                        .padding(vertical = 2.dp)
-                )
-                if (showDebug) {
-                    RecognitionDebugDialog(onDismiss = { showDebug = false })
-                }
-            }
-        }
     }
 }
 
