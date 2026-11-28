@@ -24,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import com.pickupcode.app.data.AppDatabase
 import com.pickupcode.app.data.CodeHistory
 import com.pickupcode.app.extractor.CodeExtractor
+import com.pickupcode.app.learner.CommonStationStore
 import com.pickupcode.app.learner.PatternLearner
 import com.pickupcode.app.service.CodeCompletion
 import com.pickupcode.app.preferences.AppPreferences
@@ -181,8 +182,8 @@ class MainActivity : ComponentActivity() {
                 if (showManualDialog) {
                     ManualCodeDialog(
                         onDismiss = { showManualDialog = false },
-                        onConfirm = { code, type, source ->
-                            saveManualCode(code, type, source)
+                        onConfirm = { code, type, source, pickupAddress ->
+                            saveManualCode(code, type, source, pickupAddress)
                             showManualDialog = false
                         }
                     )
@@ -284,7 +285,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun saveManualCode(code: String, type: String, source: String) {
+    private fun saveManualCode(code: String, type: String, source: String, pickupAddress: String) {
         lifecycleScope.launch(Dispatchers.IO) {
             val db = AppDatabase.getInstance(this@MainActivity)
             val codeType = when (type) {
@@ -292,15 +293,20 @@ class MainActivity : ComponentActivity() {
                 "pickup_parcel" -> CodeExtractor.CodeType.pickup_parcel
                 else -> CodeExtractor.CodeType.pickup_food // 手动录入只支持取餐/取件；默认取餐
             }
+            val cleanAddress = pickupAddress.trim()
             // 统一走 Repository（saveOrUpdate），与三条识别路径同一去重语义
             val save = db.repository.save(
                 CodeHistory(
                     code = code,
                     type = codeType.name,
                     source = source,
+                    pickupAddress = cleanAddress,
                     rawTextSnippet = "手动输入"
                 )
             )
+            if (cleanAddress.isNotBlank()) {
+                CommonStationStore.recordCode(this@MainActivity, cleanAddress)
+            }
             // 必须传入 historyId，否则通知栏「已取」无法归档（DoneReceiver 要求 historyId > 0）
             // 重复录入走去重提示，与识别路径 notifySaved 语义一致
             if (save.existed) {
