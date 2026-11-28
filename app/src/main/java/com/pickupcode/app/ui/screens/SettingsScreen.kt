@@ -10,40 +10,60 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.pickupcode.app.R
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.pickupcode.app.BuildConfig
+import com.pickupcode.app.R
 import com.pickupcode.app.learner.PatternLearner
 import com.pickupcode.app.preferences.AppPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -57,11 +77,18 @@ import kotlin.math.roundToInt
 
 private const val TAG = "SettingsScreen"
 
-// 柔和雾蓝：开关激活 / 滑块 / 统计按钮强调（沿用原设置页强调色）
-private val ValBlue = Color(0xFF8DC0E0)
-private val ValBlueLight = Color(0xFFBBD8EC)
+/** 设置页内部层级：主页做极简目录卡片（参考 FlClash），详细开关/Key/统计进二级子页 */
+private enum class SettingsPage(val title: String) {
+    MAIN("设置"),
+    RECOGNITION("识别范围"),
+    SOURCE_REMIND("来源与提醒"),
+    AI_CONFIG("AI 识别与接口"),
+    VERIFY_CONFIG("第三方验证"),
+    STATS("识别统计与自学习")
+}
 
-/** 各 section 共享的上下文，避免每个私有 Composable 传一堆参数 */
+/** 各 section 共享的上下文，避免每个私有 Composable 传一堆参数；@Stable 帮助 Compose 跳过未变分组重组 */
+@Stable
 private data class SettingsCtx(
     val ctx: Context,
     val scope: CoroutineScope,
@@ -106,6 +133,7 @@ fun SettingsScreen(
     val settingsFlow = remember { AppPreferences.observe(ctx) }
     val s by settingsFlow.collectAsState(initial = AppPreferences.Settings())
 
+    var currentPage by remember { mutableStateOf(SettingsPage.MAIN) }
     var apiUrl by remember { mutableStateOf(s.apiBaseUrl) }
     var apiKey by remember { mutableStateOf(s.apiKey) }
     var apiModel by remember { mutableStateOf(s.apiModel) }
@@ -132,7 +160,7 @@ fun SettingsScreen(
     }
 
     // remember 缓存：SettingsCtx 含函数字段（lambda），每次重建会导致 equals 恒不等，
-    // 使全部 section 每次重组（滚动/动画卡顿的根源）。键用实际可变状态，状态未变时引用稳定。
+    // 使全部 section 每次重组。键用实际可变状态，状态未变时引用稳定。
     val sc = remember(s, apiUrl, apiKey, apiModel, amapApiKey, kuaidi100Key) {
         SettingsCtx(
             ctx = ctx, scope = scope, s = s,
@@ -145,7 +173,6 @@ fun SettingsScreen(
             onKuaidi100KeyChange = { kuaidi100Key = it },
             onSmsEnable = { enable ->
                 if (enable) {
-                    // 开启时先检查权限，未授权则发起请求；已授权直接保存
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECEIVE_SMS)
                         == PackageManager.PERMISSION_GRANTED
                     ) {
@@ -166,98 +193,901 @@ fun SettingsScreen(
         )
     }
 
+    BackHandler(enabled = currentPage != SettingsPage.MAIN) {
+        currentPage = SettingsPage.MAIN
+    }
+
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background, // 与主页背景一致（跟随主题）
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("设置") },
+                title = {
+                    Text(
+                        text = currentPage.title,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                    IconButton(onClick = {
+                        if (currentPage == SettingsPage.MAIN) onBack()
+                        else currentPage = SettingsPage.MAIN
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
     ) { pad ->
-        // 只有 6 个固定卡片：LazyColumn 的懒加载/测量管理是多余开销，改用 Column + verticalScroll
-        Column(
+        AnimatedContent(
+            targetState = currentPage,
+            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
+            label = "settings_page",
             modifier = Modifier
                 .fillMaxSize()
                 .padding(pad)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            RecognitionSettingsSection(sc)
-            RulesSection(onRulesClick)
-            InputMethodsSection(sc)
-            NotificationStatusCard(sc)
-            VerifyServicesSection(sc)
-            SavedAddressSection(onSavedAddressClick)
-            LearningStatsSection(sc, onStatsClick)
-            AppearanceSection(sc)
-            AboutSection(sc)
+        ) { page ->
+            when (page) {
+                SettingsPage.MAIN -> SettingsMainContent(
+                    sc = sc,
+                    onRulesClick = onRulesClick,
+                    onSavedAddressClick = onSavedAddressClick,
+                    onOpenRecognition = { currentPage = SettingsPage.RECOGNITION },
+                    onOpenSourceRemind = { currentPage = SettingsPage.SOURCE_REMIND },
+                    onOpenAiConfig = { currentPage = SettingsPage.AI_CONFIG },
+                    onOpenVerifyConfig = { currentPage = SettingsPage.VERIFY_CONFIG },
+                    onOpenStats = { currentPage = SettingsPage.STATS }
+                )
+                SettingsPage.RECOGNITION -> RecognitionSubPage(sc)
+                SettingsPage.SOURCE_REMIND -> SourceRemindSubPage(sc)
+                SettingsPage.AI_CONFIG -> AiConfigSubPage(sc)
+                SettingsPage.VERIFY_CONFIG -> VerifyConfigSubPage(sc)
+                SettingsPage.STATS -> StatsSubPage(sc, onStatsClick)
+            }
         }
     }
 }
 
-/* ═══════════════════ 公共组件（视觉重构：分组卡片化） ═══════════════════ */
+/* ═══════════════════ 主设置页（极简大圆角分组卡片） ═══════════════════ */
 
 @Composable
-private fun SettingsSectionCard(
-    title: String,
-    subtitle: String? = null,
-    content: @Composable ColumnScope.() -> Unit
+private fun SettingsMainContent(
+    sc: SettingsCtx,
+    onRulesClick: () -> Unit,
+    onSavedAddressClick: () -> Unit,
+    onOpenRecognition: () -> Unit,
+    onOpenSourceRemind: () -> Unit,
+    onOpenAiConfig: () -> Unit,
+    onOpenVerifyConfig: () -> Unit,
+    onOpenStats: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(true) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        // 滚动列表里的阴影每帧重绘是卡顿源之一：降为 0，用浅描边保持分组视觉
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    val uriHandler = LocalUriHandler.current
+    var upStatus by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var foundRelease by remember { mutableStateOf<com.pickupcode.app.util.UpdateChecker.ReleaseInfo?>(null) }
+    var showDebug by remember { mutableStateOf(false) }
+
+    val aiSummary = remember(sc.s.enableAI, sc.s.apiKey) {
+        when {
+            !sc.s.enableAI && sc.s.apiKey.isNotBlank() -> "未启用"
+            !sc.s.enableAI -> "未启用"
+            sc.s.apiKey.isBlank() -> "未填 Key"
+            else -> "已开启"
+        }
+    }
+    val verifyCount = (if (sc.s.enableMapVerify) 1 else 0) + (if (sc.s.enableKuaidi100) 1 else 0)
+    val verifySummary = if (verifyCount == 0) "未启用" else "已启用 $verifyCount 项"
+    val recognitionSummary = remember(sc.s.enableFoodCodes, sc.s.enableParcelCodes, sc.s.enableCouponCodes) {
+        buildList {
+            if (sc.s.enableFoodCodes) add("取餐")
+            if (sc.s.enableParcelCodes) add("取件")
+            if (sc.s.enableCouponCodes) add("券码")
+        }.ifEmpty { listOf("已关闭") }.joinToString(" · ")
+    }
+
+    val notifStatus = rememberNotificationStatus(sc.ctx)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .animateContentSize(tween(180)), // 高度补间（tween 无回弹，比 spring 丝滑）
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // 标题行：点击收起/展开
+        // 仅在权限/渠道异常时置顶提示（正常时不占位，避免顶部多出 spacedBy 空白）
+        if (notifStatus.first != NotifStatus.OK) {
+            item(key = "notif_status") {
+                NotificationStatusCard(sc.ctx, notifStatus.first, notifStatus.second)
+            }
+        }
+
+        // 识别灵敏度置顶
+        item(key = "confidence") {
+            SettingsGroupCard {
+                ConfidenceSliderRow(sc)
+            }
+        }
+
+        // 1. 常用管理（无组标题置顶卡，快速直达规则、地址与统计）
+        item(key = "quick_manage") {
+            SettingsListCard {
+                SettingsNavRow(
+                    title = "识别规则",
+                    icon = R.drawable.ic_wrench,
+                    onClick = onRulesClick
+                )
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "常用取件地址",
+                    icon = R.drawable.ic_map_pin,
+                    onClick = onSavedAddressClick
+                )
+                SettingsListDivider()
+                SettingsNavRow(
+                    title = "识别统计与自学习",
+                    icon = R.drawable.ic_bar_chart_3,
+                    onClick = onOpenStats
+                )
+            }
+        }
+
+        // 2. 设置
+        item(key = "settings_group") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsGroupHeader("设置")
+                SettingsListCard {
+                    ThemePickerRow(sc)
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "识别范围",
+                        icon = R.drawable.ic_search,
+                        trailingText = recognitionSummary,
+                        onClick = onOpenRecognition
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "来源与提醒",
+                        icon = R.drawable.ic_bell,
+                        onClick = onOpenSourceRemind
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "AI 识别与接口",
+                        icon = R.drawable.ic_bot,
+                        trailingText = aiSummary,
+                        onClick = onOpenAiConfig
+                    )
+                    SettingsListDivider()
+                    SettingsNavRow(
+                        title = "第三方验证",
+                        icon = R.drawable.ic_map,
+                        trailingText = verifySummary,
+                        onClick = onOpenVerifyConfig
+                    )
+                }
+            }
+        }
+
+        // 3. 其他
+        item(key = "other_group") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SettingsGroupHeader("其他")
+                SettingsListCard {
+                    SettingsNavRow(
+                        title = "检查更新",
+                        icon = R.drawable.ic_refresh_cw,
+                        trailingText = when {
+                            checking -> "检查中…"
+                            upStatus != null -> upStatus
+                            else -> "v${BuildConfig.VERSION_NAME}"
+                        },
+                        enabled = !checking,
+                        onClick = {
+                            checking = true
+                            sc.scope.launch {
+                                when (val result = com.pickupcode.app.util.UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)) {
+                                    is com.pickupcode.app.util.UpdateChecker.CheckResult.Available -> {
+                                        upStatus = "发现新版本 v${result.release.versionName}"
+                                        foundRelease = result.release
+                                    }
+                                    com.pickupcode.app.util.UpdateChecker.CheckResult.UpToDate -> {
+                                        upStatus = "当前已是最新版本"
+                                    }
+                                    is com.pickupcode.app.util.UpdateChecker.CheckResult.Error -> {
+                                        val msg = "检查失败: ${result.message}"
+                                        upStatus = msg
+                                        Toast.makeText(sc.ctx, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                checking = false
+                            }
+                        }
+                    )
+                    if (BuildConfig.DEBUG) {
+                        SettingsListDivider()
+                        SettingsNavRow(
+                            title = "识别调试",
+                            icon = R.drawable.ic_action_info,
+                            onClick = { showDebug = true }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 底部版本说明与开源链接
+        item(key = "footer") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "码上闪记 v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "基于 ML Kit OCR · 数据仅存储在本地",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "https://github.com/zixij644-elaborate/pickup-code-app",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
+                        .padding(vertical = 2.dp)
+                )
+            }
+        }
+    }
+
+    if (showDebug) {
+        RecognitionDebugDialog(onDismiss = { showDebug = false })
+    }
+    foundRelease?.let { release ->
+        com.pickupcode.app.ui.components.UpdateAvailableDialog(
+            release = release,
+            currentVersion = BuildConfig.VERSION_NAME,
+            onDismiss = { foundRelease = null }
+        )
+    }
+}
+
+/* ═══════════════════ 二级子页 ═══════════════════ */
+
+@Composable
+private fun RecognitionSubPage(sc: SettingsCtx) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        SettingsGroupCard {
+            SettingsSwitch(
+                "取餐码",
+                icon = R.drawable.ic_cup_soda,
+                checked = sc.s.enableFoodCodes,
+                onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) }
+            )
+            SettingsDivider()
+            SettingsSwitch(
+                "取件码",
+                icon = R.drawable.ic_package,
+                checked = sc.s.enableParcelCodes,
+                onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) }
+            )
+            SettingsDivider()
+            SettingsSwitch(
+                "券码",
+                icon = R.drawable.ic_ticket,
+                sub = "识别屏幕/图片中的二维码（识别到则只标券码）",
+                checked = sc.s.enableCouponCodes,
+                onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceRemindSubPage(sc: SettingsCtx) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("自动获取")
+            SettingsGroupCard {
+                SettingsSwitch(
+                    "Intent 接收",
+                    icon = R.drawable.ic_link,
+                    sub = "接收来自其他 App 的分享（文本/图片）",
+                    checked = sc.s.enableIntentReceive,
+                    onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "分享识别",
+                    icon = R.drawable.ic_upload,
+                    sub = "文本选择菜单/拖放直达时自动识别",
+                    checked = sc.s.enableShareDetection,
+                    onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) }
+                )
+                SettingsDivider()
+                SettingsSwitch(
+                    "短信取件码自动识别",
+                    icon = R.drawable.ic_send,
+                    sub = if (sc.s.enableSmsReceive) "已开启" else "已关闭",
+                    checked = sc.s.enableSmsReceive,
+                    onChange = sc.onSmsEnable
+                )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsGroupHeader("提醒与引导")
+            SettingsGroupCard {
+                SettingsSwitch(
+                    "快递取件码到期提醒",
+                    icon = R.drawable.ic_hourglass,
+                    sub = if (sc.s.enableExpiryRemind) "存放 3 天或文本时限到达时提醒" else "已关闭",
+                    checked = sc.s.enableExpiryRemind,
+                    onChange = sc.save { AppPreferences.setEnableExpiryRemind(sc.ctx, it) }
+                )
+                SettingsDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = sc.s.hideAccessibilityCard) {
+                            sc.saveRun { AppPreferences.setHideAccessibilityCard(sc.ctx, false) }
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "在主页重新显示无障碍提示",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (sc.s.hideAccessibilityCard) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                        )
+                        Text(
+                            if (sc.s.hideAccessibilityCard) "点击恢复主页顶部的无障碍引导卡片" else "主页当前已显示无障碍提示",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiConfigSubPage(sc: SettingsCtx) {
+    var probing by remember { mutableStateOf(false) }
+    var probeText by remember { mutableStateOf<String?>(null) }
+    var probeOk by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    val uiScope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsGroupCard {
+            SettingsSwitch(
+                "启用 AI 识别",
+                icon = R.drawable.ic_bot,
+                sub = when {
+                    !sc.s.enableAI -> "已关闭（仅使用本地 OCR 与正则）"
+                    sc.s.apiKey.isNotBlank() -> "已开启"
+                    else -> "已开启，但尚未配置 API Key"
+                },
+                checked = sc.s.enableAI,
+                onChange = sc.save { AppPreferences.setEnableAI(sc.ctx, it) }
+            )
+            if (!sc.s.enableAI && sc.s.apiKey.isNotBlank()) {
+                Text(
+                    "已保存 API Key，但开关处于关闭状态 —— 打开开关后才会调用 AI。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            SettingsDivider()
+            DebouncedKeyField(
+                value = sc.apiUrl,
+                label = "API 地址",
+                onCommit = { sc.saveRun { AppPreferences.setApiBaseUrl(sc.ctx, it) } },
+                onChange = sc.onApiUrlChange
+            )
+            DebouncedKeyField(
+                value = sc.apiKey,
+                label = "API Key",
+                isPassword = true,
+                onCommit = { sc.saveRun { AppPreferences.setApiKey(sc.ctx, it) } },
+                onChange = sc.onApiKeyChange
+            )
+            DebouncedKeyField(
+                value = sc.apiModel,
+                label = "模型名称",
+                onCommit = { sc.saveRun { AppPreferences.setApiModel(sc.ctx, it) } },
+                onChange = sc.onApiModelChange
+            )
+            SettingsDivider()
+            SettingsSwitch(
+                "AI 读取图片",
+                sub = if (sc.s.enableAiImage) "已开启：整张截图压缩后发给 AI（可直接读出地址）"
+                else "已关闭：只把本地 OCR 文本发给 AI",
+                checked = sc.s.enableAiImage,
+                onChange = sc.save { AppPreferences.setEnableAiImage(sc.ctx, it) }
+            )
+            if (sc.s.enableAiImage) {
+                Text(
+                    "注意：开启后整张截图会上传到 AI 服务（包含屏幕上的手机号/姓名）。模型需支持视觉（如 deepseek-flash）；纯文本模型会自动回退为文本识别。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        SettingsGroupCard {
+            OutlinedButton(
+                enabled = !probing,
+                onClick = {
+                    probing = true
+                    probeText = null
+                    uiScope.launch {
+                        val t = com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel)
+                        val sb = StringBuilder()
+                        sb.append(
+                            if (t.ok) "文本通道：成功 · ${t.latencyMs}ms · 回复「${t.reply.ifBlank { "(空)" }}」"
+                            else "文本通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(t.error)}）"
+                        )
+                        var imgOk = true
+                        if (sc.s.enableAiImage) {
+                            val probeImg = com.pickupcode.app.util.ImageUtils.makeProbeImageBase64()
+                            val img = probeImg?.let {
+                                com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel, imageBase64 = it)
+                            }
+                            imgOk = img?.ok == true
+                            sb.append("\n").append(
+                                when {
+                                    img == null -> "图片通道：自检图生成失败"
+                                    img.ok -> "图片通道：成功 · ${img.latencyMs}ms · 识别到「${img.reply.ifBlank { "(空)" }}」（应含 CP-1234）"
+                                    else -> "图片通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(img.error)}）"
+                                }
+                            )
+                        }
+                        sb.append("\n请求地址：${t.endpoint}")
+                        probing = false
+                        probeOk = t.ok && imgOk
+                        probeText = sb.toString()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            ) { Text(if (probing) "测试中…（最多 40 秒）" else "测试 AI 连接") }
+
+            probeText?.let { msg ->
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (probeOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+            }
+
+            SettingsDivider()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded },
+                    .clickable { showHelp = !showHelp }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Text("使用说明与 DeepSeek 示例", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(if (showHelp) "▲" else "▼", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+            AnimatedVisibility(visible = showHelp) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "• AI 只做补充：正则已识别到的码不会重复入库；拿一张「正则未识别出码」的截图去分享验证最直观。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "• DeepSeek 示例：地址填 https://api.deepseek.com（或 /v1），模型填 deepseek-flash（旧版 deepseek-chat / deepseek-reasoner 已停用）。本应用会自动关闭思考模式以降低延迟。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerifyConfigSubPage(sc: SettingsCtx) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsGroupHeader("地图验证")
+        SettingsGroupCard {
+            SettingsSwitch(
+                "启用地图验证",
+                icon = R.drawable.ic_map,
+                sub = if (sc.s.enableMapVerify) "已启用" else "已关闭（隐私优先）",
+                checked = sc.s.enableMapVerify,
+                onChange = sc.save { AppPreferences.setEnableMapVerify(sc.ctx, it) }
+            )
+            if (sc.s.enableMapVerify) {
                 Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
+                    "Android 地理编码器优先使用，无需配置。如需更高精度可填高德 API Key：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    if (expanded) "▾" else "▸",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 14.sp
+                DebouncedKeyField(
+                    value = sc.amapApiKey,
+                    label = "高德 API Key（可选）",
+                    onCommit = { sc.saveRun { AppPreferences.setAmapApiKey(sc.ctx, it) } },
+                    onChange = sc.onAmapApiKeyChange
+                )
+                AmapHelpSection()
+            }
+        }
+
+        SettingsGroupHeader("快递100验证")
+        SettingsGroupCard {
+            SettingsSwitch(
+                "启用快递100验证",
+                icon = R.drawable.ic_mailbox,
+                sub = if (sc.s.enableKuaidi100) "已启用" else "已关闭",
+                checked = sc.s.enableKuaidi100,
+                onChange = sc.save { AppPreferences.setEnableKuaidi100(sc.ctx, it) }
+            )
+            if (sc.s.enableKuaidi100) {
+                DebouncedKeyField(
+                    value = sc.kuaidi100Key,
+                    label = "快递100 API Key",
+                    onCommit = { sc.saveRun { AppPreferences.setKuaidi100Key(sc.ctx, it) } },
+                    onChange = sc.onKuaidi100KeyChange
+                )
+                Kuaidi100HelpSection()
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatsSubPage(sc: SettingsCtx, onStatsClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsGroupCard {
+            OutlinedButton(
+                onClick = onStatsClick,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            ) { Text("查看详细统计 →") }
+            LearningStatsPanel(sc.ctx, sc.scope)
+        }
+    }
+}
+
+/* ═══════════════════ 公共组件（FlClash 极简大圆角分组卡片） ═══════════════════ */
+
+@Composable
+private fun SettingsGroupHeader(title: String) {
+    Text(
+        text = title,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 12.dp)
+    )
+}
+
+/** 列表目录卡片：无内边距与描边，点击涟漪铺满整行，靠浅灰底与纯白表面自然分层 */
+@Composable
+private fun SettingsListCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+/** 表单/开关分组卡片（二级子页使用，保持统一大圆角与纯白无描边风格） */
+@Composable
+private fun SettingsGroupCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun SettingsListDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 18.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    )
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    )
+}
+
+@Composable
+private fun SettingsNavRow(
+    title: String,
+    @DrawableRes icon: Int? = null,
+    trailingText: String? = null,
+    enabled: Boolean = true,
+    showArrow: Boolean = true,
+    onClick: () -> Unit
+) {
+    val titleColor = if (enabled) MaterialTheme.colorScheme.onSurface
+    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        if (icon != null) {
+            Image(
+                painter = painterResource(icon),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Text(
+            text = title,
+            fontSize = 16.sp,
+            color = titleColor,
+            modifier = Modifier.weight(1f)
+        )
+        if (trailingText != null) {
+            Text(
+                text = trailingText,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (showArrow) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
+ * FlClash（prism_ui）同款单行选择器：
+ * - 点击整行从右侧值位置（overAnchorEnd）弹性展开纯白/深色浮层；
+ * - 展开弹簧沿用 prism_ui 的 stiffness=400f, dampingRatio=0.754f（带轻微过冲回弹）；
+ * - 同步胶囊圆角形变 + Android 12+ 内容轻微模糊淡入；收起时缩回右侧值后再切换文字。
+ */
+@Composable
+private fun ThemePickerRow(sc: SettingsCtx) {
+    var showMenu by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val options = remember {
+        listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色")
+    }
+    val currentLabel = options.firstOrNull { it.first == sc.s.darkMode }?.second ?: "跟随系统"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showMenu = true }
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_lightbulb),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurfaceVariant),
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = "外观主题",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        // Popup 锚定在右侧值控件上，与 FlClash 的 PopupAnchor(overAnchorEnd) 一致
+        Box {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                AnimatedContent(
+                    targetState = currentLabel,
+                    transitionSpec = {
+                        (fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 3 }) togetherWith
+                            (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 3 })
+                    },
+                    label = "theme_value_text"
+                ) { label ->
+                    Text(
+                        text = label,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.UnfoldMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
-            // 高度交给外层 animateContentSize 补间（避免 expand/shrink 每帧重测复杂内容导致末段卡顿）；
-            // AnimatedVisibility 只做 alpha 淡入淡出（GPU 合成，开销小）
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn(tween(180)),
-                exit = fadeOut(tween(180))
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (subtitle != null) {
-                        Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            if (showMenu) {
+                val progress = remember { Animatable(0f) }
+                val popupScope = rememberCoroutineScope()
+                var dismissing by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    progress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.754f,
+                            stiffness = 400f
+                        )
+                    )
+                }
+
+                fun dismissWith(pickedValue: String?) {
+                    if (dismissing) return
+                    dismissing = true
+                    popupScope.launch {
+                        progress.animateTo(
+                            targetValue = 0f,
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                        )
+                        showMenu = false
+                        if (pickedValue != null && pickedValue != sc.s.darkMode) {
+                            sc.saveRun { AppPreferences.setDarkMode(sc.ctx, pickedValue) }
+                        }
                     }
-                    Spacer(Modifier.height(2.dp))
-                    content()
+                }
+
+                val p = progress.value
+                val pClamped = p.coerceIn(0f, 1f)
+                val sx = 0.45f + (1f - 0.45f) * p
+                val sy = 0.28f + (1f - 0.28f) * p
+                val surfaceAlpha = (p * 2.4f).coerceIn(0f, 1f)
+                val contentAlpha = ((p - 0.14f) / 0.65f).coerceIn(0f, 1f)
+                val cornerDp = (26f - 8f * pClamped).dp
+                val blurDp = ((1f - pClamped) * 4f).coerceAtLeast(0f).dp
+
+                Popup(
+                    alignment = Alignment.TopEnd,
+                    offset = IntOffset(
+                        x = with(density) { 8.dp.roundToPx() },
+                        y = with(density) { (-6).dp.roundToPx() }
+                    ),
+                    onDismissRequest = { dismissWith(null) },
+                    properties = PopupProperties(focusable = true)
+                ) {
+                    // 给弹簧过冲留出轻微裁切安全边距，避免阴影被 Popup 窗口边缘切掉
+                    Box(modifier = Modifier.padding(12.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(cornerDp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp,
+                            shadowElevation = (10f * pClamped).dp,
+                            border = BorderStroke(
+                                0.5.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f * pClamped)
+                            ),
+                            modifier = Modifier
+                                .width(160.dp)
+                                .graphicsLayer {
+                                    scaleX = sx
+                                    scaleY = sy
+                                    alpha = surfaceAlpha
+                                    transformOrigin = TransformOrigin(0.92f, 0.12f)
+                                }
+                        ) {
+                            val contentMod = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.1.dp) {
+                                Modifier
+                                    .padding(vertical = 6.dp)
+                                    .blur(blurDp)
+                                    .graphicsLayer { alpha = contentAlpha }
+                            } else {
+                                Modifier
+                                    .padding(vertical = 6.dp)
+                                    .graphicsLayer { alpha = contentAlpha }
+                            }
+                            Column(modifier = contentMod) {
+                                options.forEach { (value, label) ->
+                                    val selected = sc.s.darkMode == value
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { dismissWith(value) }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.size(18.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (selected) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = label,
+                                            fontSize = 15.sp,
+                                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                            color = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -277,8 +1107,7 @@ private fun SettingsSwitch(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f)) {
-            // 图标（Lucide 线性）替代原先写在标题里的 Emoji（用户 2026-09-18 要求）
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
             if (icon != null) {
                 com.pickupcode.app.ui.components.IconText(
                     icon = icon,
@@ -290,16 +1119,19 @@ private fun SettingsSwitch(
                 Text(title, style = MaterialTheme.typography.bodyLarge)
             }
             sub?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         Switch(
             checked = checked,
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = ValBlue,
-                checkedTrackColor = ValBlueLight,
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
                 uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
@@ -307,92 +1139,35 @@ private fun SettingsSwitch(
     }
 }
 
-/* ═══════════════════ 各分组 Section ═══════════════════ */
+/* ═══════════════════ 主页内嵌区块 ═══════════════════ */
 
 @Composable
-private fun SettingsSubHeader(text: String, @DrawableRes icon: Int? = null) {
-    if (icon != null) {
-        com.pickupcode.app.ui.components.IconText(
-            icon = icon,
-            text = text,
-            iconSize = 16.dp,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-    } else {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-    }
-}
-
-/** ① 识别设置：灵敏度 + 识别类型 */
-@Composable
-private fun RecognitionSettingsSection(sc: SettingsCtx) {
-    SettingsSectionCard(title = "识别设置", subtitle = "识别哪些码、匹配多严格") {
-        SettingsSubHeader("识别灵敏度")
-        var confDraft by remember(sc.s.confidenceThreshold) { mutableStateOf(sc.s.confidenceThreshold) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Slider(
-                value = confDraft,
-                onValueChange = { confDraft = it },
-                onValueChangeFinished = { sc.saveRun { AppPreferences.setConfidenceThreshold(sc.ctx, confDraft) } },
-                valueRange = 0.1f..0.8f,
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(
-                    thumbColor = ValBlue,
-                    activeTrackColor = ValBlueLight,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            )
-            Text("${(confDraft * 100).roundToInt()}%", modifier = Modifier.padding(start = 8.dp))
-        }
-        SettingsSubHeader("识别类型")
-        SettingsSwitch("取餐码", icon = R.drawable.ic_cup_soda, checked = sc.s.enableFoodCodes, onChange = sc.save { AppPreferences.setEnableFood(sc.ctx, it) })
-        SettingsSwitch("取件码", icon = R.drawable.ic_package, checked = sc.s.enableParcelCodes, onChange = sc.save { AppPreferences.setEnableParcel(sc.ctx, it) })
-        SettingsSwitch(
-            "券码", icon = R.drawable.ic_ticket,
-            sub = "识别屏幕/图片中的二维码（解码内容为码值；识别到则只标券码，不叠加取餐/取件码）",
-            checked = sc.s.enableCouponCodes,
-            onChange = sc.save { AppPreferences.setEnableCoupon(sc.ctx, it) }
-        )
-    }
-}
-
-/** ② 输入方式：无障碍 + 外部接收 + 短信 */
-@Composable
-private fun InputMethodsSection(sc: SettingsCtx) {
-    SettingsSectionCard(title = "输入方式", subtitle = "取件码从哪里来") {
-        SettingsSubHeader("无障碍服务")
-        OutlinedButton(
-            onClick = { sc.saveRun { AppPreferences.setHideAccessibilityCard(sc.ctx, false) } },
-            enabled = sc.s.hideAccessibilityCard,
+private fun ConfidenceSliderRow(sc: SettingsCtx) {
+    var confDraft by remember(sc.s.confidenceThreshold) { mutableStateOf(sc.s.confidenceThreshold) }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-        ) { Text("在主页重新显示无障碍提示") }
-        SettingsSubHeader("外部接收")
-        SettingsSwitch("Intent 接收", icon = R.drawable.ic_link, sub = "接收来自其他App的分享（文本/图片）", checked = sc.s.enableIntentReceive, onChange = sc.save { AppPreferences.setEnableIntentReceive(sc.ctx, it) })
-        SettingsSwitch("分享识别", icon = R.drawable.ic_upload, sub = "文本选择菜单/拖放直达时自动识别取餐取件码", checked = sc.s.enableShareDetection, onChange = sc.save { AppPreferences.setEnableShareDetection(sc.ctx, it) })
-        SettingsSubHeader("短信识别")
-        SettingsSwitch(
-            "短信取件码自动识别", icon = R.drawable.ic_send,
-            sub = if (sc.s.enableSmsReceive) "已开启" else "已关闭",
-            checked = sc.s.enableSmsReceive,
-            onChange = sc.onSmsEnable
-        )
-        SettingsSubHeader("到期提醒", icon = R.drawable.ic_hourglass)
-        SettingsSwitch(
-            "快递取件码到期提醒",
-            sub = if (sc.s.enableExpiryRemind) "存放 3 天或文本时限到达时自动提醒" else "已关闭",
-            checked = sc.s.enableExpiryRemind,
-            onChange = { v -> sc.save { AppPreferences.setEnableExpiryRemind(sc.ctx, v) } }
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("识别灵敏度", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "${(confDraft * 100).roundToInt()}%",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Slider(
+            value = confDraft,
+            onValueChange = { confDraft = it },
+            onValueChangeFinished = { sc.saveRun { AppPreferences.setConfidenceThreshold(sc.ctx, confDraft) } },
+            valueRange = 0.1f..0.8f,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
         )
     }
 }
@@ -409,50 +1184,50 @@ private enum class NotifStatus { OK, NEED_PERMISSION, DISABLED, CHANNEL_SILENT }
 private fun computeNotificationStatus(ctx: Context): Pair<NotifStatus, String> {
     val nm = ctx.getSystemService(NotificationManager::class.java)
         ?: return NotifStatus.OK to ""
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
-        PackageManager.PERMISSION_GRANTED
+
+    if (Build.VERSION.SDK_INT >= 33 &&
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
+        != PackageManager.PERMISSION_GRANTED
     ) {
-        return NotifStatus.NEED_PERMISSION to "Android 13+ 需要「通知」权限，未授权时所有通知都不会显示"
+        return NotifStatus.NEED_PERMISSION to "Android 13+ 需要授予通知权限才能弹出取件码卡片"
     }
-    // areNotificationsEnabled() 反映系统通知管理总开关（含 ROM 层），不只 Android 13 权限
+
     if (!nm.areNotificationsEnabled()) {
-        return NotifStatus.DISABLED to "系统「通知管理」里本 App 的通知被整体关闭，识别结果不会提醒"
+        return NotifStatus.DISABLED to "系统「通知管理」里本应用的通知开关处于关闭状态，请在系统设置中打开"
     }
-    val silentChannels = listOf("pickup_food", "pickup_parcel", "pickup_coupon")
-        .mapNotNull { nm.getNotificationChannel(it) }
+
+    val silent = nm.notificationChannels
         .filter { it.importance == NotificationManager.IMPORTANCE_NONE }
-    if (silentChannels.isNotEmpty()) {
-        return NotifStatus.CHANNEL_SILENT to
-            "以下渠道被设为静默，通知可能不显示：${silentChannels.joinToString("、") { it.name }}"
+        .map { it.name.toString() }
+    if (silent.isNotEmpty()) {
+        return NotifStatus.CHANNEL_SILENT to "以下通知渠道被设为静默，无法弹出提醒：${silent.joinToString("、")}"
     }
+
     return NotifStatus.OK to ""
 }
 
 private fun openNotificationSettings(ctx: Context) {
     try {
         ctx.startActivity(
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         )
     } catch (_: Exception) {
-        try {
-            ctx.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
-            )
-        } catch (_: Exception) {
-            Toast.makeText(ctx, "无法打开通知设置", Toast.LENGTH_SHORT).show()
-        }
+        ctx.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", ctx.packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
     }
 }
 
-/** 通知状态卡片：有问题才显示（正常时不占版面）；从系统设置返回时自动刷新。 */
 @Composable
-private fun NotificationStatusCard(sc: SettingsCtx) {
-    val ctx = sc.ctx
+private fun rememberNotificationStatus(ctx: Context): Pair<NotifStatus, String> {
     val lifecycleOwner = LocalLifecycleOwner.current
     var refreshTick by remember { mutableIntStateOf(0) }
-    // 从系统「通知设置」页返回后重算（用户可能刚去开了开关）
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) refreshTick++
@@ -460,7 +1235,14 @@ private fun NotificationStatusCard(sc: SettingsCtx) {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    val (status, desc) = remember(refreshTick) { computeNotificationStatus(ctx) }
+    val statusState by produceState(initialValue = NotifStatus.OK to "", ctx, refreshTick) {
+        value = withContext(Dispatchers.IO) { computeNotificationStatus(ctx) }
+    }
+    return statusState
+}
+
+@Composable
+private fun NotificationStatusCard(ctx: Context, status: NotifStatus, desc: String) {
     if (status == NotifStatus.OK) return
 
     val isError = status == NotifStatus.DISABLED
@@ -489,317 +1271,7 @@ private fun NotificationStatusCard(sc: SettingsCtx) {
     }
 }
 
-@Composable
-private fun RulesSection(onRulesClick: () -> Unit) {
-    SettingsSectionCard(
-        title = "识别规则",
-        subtitle = "查看/停用/改写内置正则，也能自己添加规则；改坏了可一键还原"
-    ) {
-        OutlinedButton(
-            onClick = onRulesClick,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, ValBlue),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = ValBlue)
-        ) { Text("管理识别规则 →") }
-    }
-}
-
-@Composable
-private fun LearningStatsSection(sc: SettingsCtx, onStatsClick: () -> Unit) {
-    SettingsSectionCard(title = "数据统计") {
-        OutlinedButton(
-            onClick = onStatsClick,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, ValBlue),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = ValBlue)
-        ) { Text("查看详细统计 →") }
-        LearningStatsPanel(sc.ctx, sc.scope)
-    }
-}
-
-@Composable
-private fun VerifyServicesSection(sc: SettingsCtx) {
-    // 「测试 AI 连接」的自检状态（诊断用：把"配了 Key 却没作用"变成一条能看懂的结果）
-    var probing by remember { mutableStateOf(false) }
-    var probeText by remember { mutableStateOf<String?>(null) }
-    var probeOk by remember { mutableStateOf(false) }
-    val uiScope = rememberCoroutineScope()
-
-    SettingsSectionCard(title = "辅助验证", subtitle = "第三方服务验证 OCR 结果（需联网，可选）") {
-        SettingsSubHeader("地图验证", icon = R.drawable.ic_map)
-        SettingsSwitch(
-            "启用地图验证",
-            sub = if (sc.s.enableMapVerify) "已启用" else "已关闭（隐私优先）",
-            checked = sc.s.enableMapVerify,
-            onChange = sc.save { AppPreferences.setEnableMapVerify(sc.ctx, it) }
-        )
-        if (sc.s.enableMapVerify) {
-            Text("Android 地理编码器优先使用，无需配置。如需更高精度可填高德 API Key：",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            DebouncedKeyField(
-                value = sc.amapApiKey, label = "高德 API Key（可选）",
-                onCommit = { sc.saveRun { AppPreferences.setAmapApiKey(sc.ctx, it) } },
-                onChange = sc.onAmapApiKeyChange
-            )
-            AmapHelpSection()
-        }
-        SettingsSubHeader("快递100验证", icon = R.drawable.ic_mailbox)
-        SettingsSwitch(
-            "启用快递100验证",
-            sub = if (sc.s.enableKuaidi100) "已启用" else "已关闭",
-            checked = sc.s.enableKuaidi100,
-            onChange = sc.save { AppPreferences.setEnableKuaidi100(sc.ctx, it) }
-        )
-        if (sc.s.enableKuaidi100) {
-            DebouncedKeyField(
-                value = sc.kuaidi100Key, label = "快递100 API Key",
-                onCommit = { sc.saveRun { AppPreferences.setKuaidi100Key(sc.ctx, it) } },
-                onChange = sc.onKuaidi100KeyChange
-            )
-            Kuaidi100HelpSection()
-        }
-        SettingsSubHeader("AI 识别", icon = R.drawable.ic_bot)
-        SettingsSwitch(
-            "启用 AI 识别",
-            sub = if (sc.s.enableAI) {
-                if (sc.s.apiKey.isNotBlank()) "已开启" else "未配置 API Key"
-            } else "已关闭",
-            checked = sc.s.enableAI,
-            onChange = sc.save { AppPreferences.setEnableAI(sc.ctx, it) }
-        )
-        if (sc.s.enableAI) {
-            DebouncedKeyField(
-                value = sc.apiUrl, label = "API 地址",
-                onCommit = { sc.saveRun { AppPreferences.setApiBaseUrl(sc.ctx, it) } },
-                onChange = sc.onApiUrlChange
-            )
-            DebouncedKeyField(
-                value = sc.apiKey, label = "API Key", isPassword = true,
-                onCommit = { sc.saveRun { AppPreferences.setApiKey(sc.ctx, it) } },
-                onChange = sc.onApiKeyChange
-            )
-            DebouncedKeyField(
-                value = sc.apiModel, label = "模型名称",
-                onCommit = { sc.saveRun { AppPreferences.setApiModel(sc.ctx, it) } },
-                onChange = sc.onApiModelChange
-            )
-            SettingsSwitch(
-                "AI 读取图片",
-                sub = if (sc.s.enableAiImage) "已开启：整张截图压缩后发给 AI（直接读图，能读出地址）"
-                else "已关闭：只把本地 OCR 文本发给 AI",
-                checked = sc.s.enableAiImage,
-                onChange = sc.save { AppPreferences.setEnableAiImage(sc.ctx, it) }
-            )
-            if (sc.s.enableAiImage) {
-                Text(
-                    "注意：开启后整张截图会上传到 AI 服务（屏幕上出现的手机号/姓名也会一并上传）。" +
-                        "模型需支持视觉（如 deepseek-flash）；deepseek-v4-pro 不支持图片，会自动回退为文本识别。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        } else {
-            // 2026-09-17 真机排障：用户把 Key/地址/模型都填好了，却忘了打开上面的开关，
-            // 而字段又只在开关打开时才显示 → 看起来"配置好了却没作用"。这里给出明确提示。
-            Text(
-                if (sc.s.apiKey.isNotBlank())
-                    "已保存 API Key，但上面的开关是关的 —— 识别流程不会调用 AI。要生效请先打开它。"
-                else "AI 识别处于关闭状态。填好 API 地址/Key/模型后，记得打开上面的开关。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-
-        // —— 诊断：AI 连接自检（**无论开关是否打开都显示**，避免"配了却没开开关"无从判断）——
-        // 设计目的：AI 只做"补漏"（正则识别到的码会被去重丢弃），失败也只写日志，
-        // 于是"配好了却没作用"很难判断。这里直接用当前 URL/Key/模型发一次最小请求，
-        // 把 HTTP 状态码、错误正文、耗时、**实际请求地址**都显示出来。
-        Text(
-            "AI 只做补充：正则已识别到的码不会重复入库，所以界面可能看不出变化。" +
-                "想确认配置是否生效，用下面这个按钮；也可拿一张「正则识别不出码」的截图去分享验证。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "DeepSeek 示例：地址 https://api.deepseek.com（或 /v1），模型 deepseek-flash；" +
-                "注意旧文档里的 deepseek-chat / deepseek-reasoner 已停用，填了会返回 400（模型不存在）。" +
-                "本应用对 DeepSeek 会自动关闭思考模式以降低延迟。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        OutlinedButton(
-            enabled = !probing,
-            onClick = {
-                probing = true
-                probeText = null
-                uiScope.launch {
-                    val t = com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel)
-                    val sb = StringBuilder()
-                    sb.append(
-                        if (t.ok) "文本通道：成功 · ${t.latencyMs}ms · 回复「${t.reply.ifBlank { "(空)" }}」"
-                        else "文本通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(t.error)}）"
-                    )
-                    var imgOk = true
-                    if (sc.s.enableAiImage) {
-                        val probeImg = com.pickupcode.app.util.ImageUtils.makeProbeImageBase64()
-                        val img = probeImg?.let {
-                            com.pickupcode.app.extractor.AIExtractor.probe(sc.apiKey, sc.apiUrl, sc.apiModel, imageBase64 = it)
-                        }
-                        imgOk = img?.ok == true
-                        sb.append("\n").append(
-                            when {
-                                img == null -> "图片通道：自检图生成失败"
-                                img.ok -> "图片通道：成功 · ${img.latencyMs}ms · 识别到「${img.reply.ifBlank { "(空)" }}」（应含 CP-1234）"
-                                else -> "图片通道：失败（${com.pickupcode.app.extractor.AIExtractor.categorizeError(img.error)}）"
-                            }
-                        )
-                    }
-                    sb.append("\n请求地址：${t.endpoint}")
-                    probing = false
-                    probeOk = t.ok && imgOk
-                    probeText = sb.toString()
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, ValBlue),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = ValBlue)
-        ) { Text(if (probing) "测试中…（最多 40 秒）" else "测试 AI 连接") }
-        probeText?.let { msg ->
-            Text(
-                msg,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (probeOk) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
-            )
-        }
-    }
-}
-
-@Composable
-private fun AppearanceSection(sc: SettingsCtx) {
-    SettingsSectionCard(title = "外观") {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEachIndexed { i, (v, l) ->
-                SegmentedButton(
-                    selected = sc.s.darkMode == v,
-                    onClick = { sc.saveRun { AppPreferences.setDarkMode(sc.ctx, v) } },
-                    shape = SegmentedButtonDefaults.itemShape(i, 3),
-                    colors = SegmentedButtonDefaults.colors(
-                        activeContainerColor = ValBlue,
-                        activeContentColor = MaterialTheme.colorScheme.onSurface,
-                        inactiveContainerColor = MaterialTheme.colorScheme.surface,
-                        inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) { Text(l) }
-            }
-        }
-    }
-}
-
-/**
- * 常用取件地址（预存地址）入口。
- * 与自动学习的"常用站点"分开：这里进的是用户手动录入的权威地址列表。
- */
-@Composable
-private fun SavedAddressSection(onClick: () -> Unit) {
-    SettingsSectionCard(title = "常用取件地址") {
-        Column {
-            Text(
-                "预存你常去的驿站/快递柜地址，识别时优先采用（用你录入的地址替换 OCR 原文）。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "管理常用地址 ›",
-                style = MaterialTheme.typography.bodyMedium,
-                color = ValBlue,
-                modifier = Modifier
-                    .clickable { onClick() }
-                    .padding(vertical = 4.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun AboutSection(sc: SettingsCtx) {    SettingsSectionCard(title = "关于") {
-        Column {
-            Text("码上闪记 v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
-            Text("基于 ML Kit OCR · 数据仅存储在本地",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(4.dp))
-            val uriHandler = LocalUriHandler.current
-            Text(
-                "GitHub: https://github.com/zixij644-elaborate/pickup-code-app",
-                style = MaterialTheme.typography.bodySmall,
-                color = ValBlue,
-                modifier = Modifier
-                    .clickable { uriHandler.openUri("https://github.com/zixij644-elaborate/pickup-code-app") }
-                    .padding(vertical = 2.dp)
-            )
-            // 识别调试面板：仅 DEBUG 构建显示（生产裁剪）
-            if (BuildConfig.DEBUG) {
-                var showDebug by remember { mutableStateOf(false) }
-                Text(
-                    "识别调试",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ValBlue,
-                    modifier = Modifier
-                        .clickable { showDebug = true }
-                        .padding(vertical = 2.dp)
-                )
-                if (showDebug) {
-                    RecognitionDebugDialog(onDismiss = { showDebug = false })
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        var upStatus by remember { mutableStateOf<String?>(null) }
-        var checking by remember { mutableStateOf(false) }
-        var foundRelease by remember { mutableStateOf<com.pickupcode.app.util.UpdateChecker.ReleaseInfo?>(null) }
-        OutlinedButton(
-            onClick = {
-                checking = true
-                sc.scope.launch {
-                    when (val result = com.pickupcode.app.util.UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)) {
-                        is com.pickupcode.app.util.UpdateChecker.CheckResult.Available -> {
-                            upStatus = "发现新版本 v${result.release.versionName}"
-                            foundRelease = result.release
-                        }
-                        com.pickupcode.app.util.UpdateChecker.CheckResult.UpToDate -> {
-                            upStatus = "当前已是最新版本"
-                        }
-                        is com.pickupcode.app.util.UpdateChecker.CheckResult.Error -> {
-                            val msg = "检查失败: ${result.message}"
-                            upStatus = msg
-                            Toast.makeText(sc.ctx, msg, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    checking = false
-                }
-            },
-            enabled = !checking,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-        ) { Text(if (checking) "检查中..." else "检查更新") }
-        upStatus?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        foundRelease?.let { release ->
-            com.pickupcode.app.ui.components.UpdateAvailableDialog(
-                release = release,
-                currentVersion = BuildConfig.VERSION_NAME,
-                onDismiss = { foundRelease = null }
-            )
-        }
-    }
-}
-
-/* ═══════════════════ 原辅助组件（保留） ═══════════════════ */
+/* ═══════════════════ 统计、防抖输入框与帮助折叠组件 ═══════════════════ */
 
 @Composable
 private fun LearningStatsPanel(ctx: Context, scope: CoroutineScope) {
@@ -842,11 +1314,11 @@ private fun LearningStatsPanel(ctx: Context, scope: CoroutineScope) {
         }
 
         if (suggestions.isNotEmpty()) {
-            Text("候选模式：", style = MaterialTheme.typography.labelMedium, color = ValBlue)
+            Text("候选模式：", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             for (sg in suggestions.take(3)) {
                 Text("  ${sg.label} — ${sg.count} 条未匹配", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                 Text("  样例: ${sg.sampleCodes.joinToString("，")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("  建议: ${sg.proposedRegex}", style = MaterialTheme.typography.bodySmall, color = ValBlue)
+                Text("  建议: ${sg.proposedRegex}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -871,20 +1343,15 @@ private fun DebouncedKeyField(
     isPassword: Boolean = false,
     debounceMs: Long = 400
 ) {
-    // 以 value 作 key：外部回填（如 DataStore 异步加载后）变化时重置内部 text，
-    // 否则已配置的 Key/URL 在重启后显示为空/默认值（M1 回归）。
     var text by remember(value) { mutableStateOf(value) }
     var visible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    // 用 remember 持有 Job，避免重组时重置为 null 导致防抖失效（H5）
     val saveJob = remember { mutableStateOf<Job?>(null) }
-    // 离开页面时若仍有未提交的防抖输入，立即落盘，避免 400ms 内返回导致 Key/URL 静默丢失
     val latestText = remember { mutableStateOf(text) }
     latestText.value = text
-    androidx.compose.runtime.DisposableEffect(Unit) {
+    DisposableEffect(Unit) {
         onDispose {
             saveJob.value?.cancel()
-            // 仅当与外部 value 不同才提交，避免无改动的多余写
             if (latestText.value != value) {
                 onCommit(latestText.value)
             }
@@ -908,8 +1375,10 @@ private fun DebouncedKeyField(
         visualTransformation = if (isPassword && !visible) PasswordVisualTransformation() else VisualTransformation.None,
         trailingIcon = if (isPassword) {
             {
-                TextButton(onClick = { visible = !visible },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+                TextButton(
+                    onClick = { visible = !visible },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                ) {
                     Text(if (visible) "隐藏" else "显示", style = MaterialTheme.typography.labelSmall)
                 }
             }
@@ -925,7 +1394,11 @@ private fun AmapHelpSection() {
             Text(if (expanded) "收起说明 ▲" else "如何获取高德 API Key？▼", style = MaterialTheme.typography.labelMedium)
         }
         if (expanded) {
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(0.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("1. 打开浏览器访问", style = MaterialTheme.typography.bodySmall)
                     Text("   https://console.amap.com/", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
@@ -949,7 +1422,11 @@ private fun Kuaidi100HelpSection() {
             Text(if (expanded) "收起说明 ▲" else "如何获取快递100 API Key？▼", style = MaterialTheme.typography.labelMedium)
         }
         if (expanded) {
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(0.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("1. 打开浏览器访问", style = MaterialTheme.typography.bodySmall)
                     Text("   https://api.kuaidi100.com/", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)

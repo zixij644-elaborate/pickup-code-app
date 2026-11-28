@@ -38,6 +38,7 @@ android {
         //    release.yml 现已加"APK versionName == tag"校验来拦截这类失误。
         versionCode = 28
         versionName = "1.1.2"
+        manifestPlaceholders["appName"] = "码上闪记"
     }
 
     signingConfigs {
@@ -58,6 +59,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            manifestPlaceholders["appName"] = "码上闪记 Debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
