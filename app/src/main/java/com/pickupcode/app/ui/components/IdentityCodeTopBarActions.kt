@@ -88,9 +88,10 @@ private fun IdentityTopBarButton(
             painter = painterResource(icon),
             contentDescription = label,
             colorFilter = ColorFilter.tint(tint),
+            // 与顶栏 Lucide 20dp 图标视觉对齐（arcticons 48×48 + 3.2 描边在 21dp 下粗细最协调）
             // 未安装：只降透明度，但仍可点（点了给明确提示，而不是直接禁用让人困惑）
             modifier = Modifier
-                .size(24.dp)
+                .size(21.dp)
                 .alpha(if (installed) 1f else 0.38f)
         )
     }
