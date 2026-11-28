@@ -1,9 +1,11 @@
 package com.pickupcode.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -15,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.pickupcode.app.learner.CommonStationStore
 import com.pickupcode.app.learner.SavedAddressStore
 import kotlinx.coroutines.Dispatchers
@@ -48,9 +51,10 @@ fun SavedAddressScreen(onBack: () -> Unit) {
     LaunchedEffect(Unit) { reload() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("常用取件地址") },
+                title = { Text("常用取件地址", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -61,7 +65,10 @@ fun SavedAddressScreen(onBack: () -> Unit) {
                         editing = null
                         showEditor = true
                     }) { Icon(Icons.Default.Add, contentDescription = "新增") }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
         snackbarHost = { SnackbarHost(snackbar) }
@@ -71,6 +78,7 @@ fun SavedAddressScreen(onBack: () -> Unit) {
                 "填「完整名称」+「关键词」：识别到任一关键词时，就用完整名称替换掉识别结果。" +
                     "关键词留空则用完整名称匹配。数据仅加密保存在本机。",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -78,44 +86,62 @@ fun SavedAddressScreen(onBack: () -> Unit) {
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        val candidates = withContext(Dispatchers.IO) {
-                            val stations = CommonStationStore.getCommonStations(context).map { it.name }
-                            val points = CommonStationStore.getPickupPoints(context).map { it.name }
-                            (points + stations).filter { it.isNotBlank() }.distinct().take(30)
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val candidates = withContext(Dispatchers.IO) {
+                                val stations = CommonStationStore.getCommonStations(context).map { it.name }
+                                val points = CommonStationStore.getPickupPoints(context).map { it.name }
+                                (points + stations).filter { it.isNotBlank() }.distinct().take(30)
+                            }
+                            if (candidates.isEmpty()) {
+                                snackbar.showSnackbar("还没有可导入的历史记录")
+                            } else {
+                                importCandidates = candidates
+                                showImport = true
+                            }
                         }
-                        if (candidates.isEmpty()) {
-                            snackbar.showSnackbar("还没有可导入的历史记录")
-                        } else {
-                            importCandidates = candidates
-                            showImport = true
-                        }
-                    }
-                }) { Text("从历史导入") }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) { Text("从历史导入") }
 
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        withContext(Dispatchers.IO) { SavedAddressStore.clear(context) }
-                        reload()
-                        snackbar.showSnackbar("已清除全部常用地址")
-                    }
-                }) { Text("全部清除") }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { SavedAddressStore.clear(context) }
+                            reload()
+                            snackbar.showSnackbar("已清除全部常用地址")
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) { Text("全部清除") }
             }
 
             if (items.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("还没有预存地址\n点右上角 + 添加，或从历史导入", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "还没有预存地址\n点右上角 + 添加，或从历史导入",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
                 LazyColumn(
-                    Modifier.weight(1f).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(items, key = { it.id }) { item ->
-                        Card(Modifier.fillMaxWidth()) {
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        ) {
                             Row(
-                                Modifier.fillMaxWidth().padding(12.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(
@@ -157,7 +183,13 @@ fun SavedAddressScreen(onBack: () -> Unit) {
                                             withContext(Dispatchers.IO) { SavedAddressStore.setEnabled(context, item.id, on) }
                                             reload()
                                         }
-                                    }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
                                 )
                                 IconButton(onClick = {
                                     scope.launch {

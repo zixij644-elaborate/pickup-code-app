@@ -3,6 +3,7 @@ package com.pickupcode.app.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -10,10 +11,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.pickupcode.app.R
 import com.pickupcode.app.ui.components.IconText
 import com.pickupcode.app.util.IdentityCodeLauncher
@@ -55,14 +56,18 @@ fun IdentityCodeScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("身份码") },
+                title = { Text("身份码", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
         snackbarHost = { SnackbarHost(snackbar) }
@@ -108,7 +113,7 @@ fun IdentityCodeScreen(onBack: () -> Unit) {
                 "身份码等于取件授权，请勿截图外传。",
                 iconSize = 15.dp,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFB3261E)
+                color = MaterialTheme.colorScheme.error
             )
         }
     }
@@ -122,9 +127,12 @@ private fun IdentityEntry(
     onClick: () -> Unit
 ) {
     Card(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .let { if (installed) it.clickable(onClick = onClick) else it }
+            .let { if (installed) it.clickable(onClick = onClick) else it },
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             Modifier
