@@ -93,21 +93,31 @@ fun CodeDetailScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("详情") },
+                title = {
+                    Text(
+                        text = "详情",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 // 身份码跳转：三家分开、各带 logo（用户要求放在标题栏右侧）
-                actions = { IdentityCodeTopBarActions() }
+                actions = { IdentityCodeTopBarActions() },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // 2026-09-15 用户要求：删掉「类型」卡片（码值类型在主页列表已有筛选/徽标体现，详情页里冗余）
             EditableField(label = "码值", value = item.code, displayFontSize = 28.sp, displayFontWeight = FontWeight.Bold,
@@ -276,8 +286,12 @@ fun CodeDetailScreen(
                 LaunchedEffect(item.screenshotPath) { bitmap = withContext(Dispatchers.IO) { decodeSampledBitmap(item.screenshotPath, 1600) } }
                 // 不手动 recycle：Compose 的 Bitmap.asImageBitmap() 与状态共享受管理时，手动 recycle 可能造成
                 // 「已回收位图仍在绘制」崩溃（Canvas 绘制期 native 已释放）。交由 GC/Compose 生命周期管理。
-                Card(Modifier.fillMaxWidth().clickable { showFullscreen = true },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { showFullscreen = true },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
                     Column(Modifier.padding(16.dp)) {
                         IconText(R.drawable.ic_camera, "截屏（点击放大）",
                             iconSize = 15.dp,
@@ -323,7 +337,12 @@ fun CodeDetailScreen(
                 }
             }
 
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("OCR 原始文本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
@@ -356,17 +375,27 @@ fun CodeDetailScreen(
                     }
                 }
                 if (onMarkDone != null) {
-                    Button(onClick = {
-                        confirmAll()
-                        // C2: 标记已取时把取件地址登记为常用取件点（IO 线程写盘，避免主线程同步 IO）
-                        if (item.pickupAddress.isNotBlank()) {
-                            scope.launch(Dispatchers.IO) { CommonStationStore.registerPickupPoint(ctx, item.pickupAddress) }
-                        }
-                        onMarkDone(item.id)
-                    }, modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8DC0E0), contentColor = Color.White)) {
-                        IconText(R.drawable.ic_package, "标记已取", iconSize = 16.dp,
-                            color = Color.White, iconTint = Color.White)
+                    Button(
+                        onClick = {
+                            confirmAll()
+                            // C2: 标记已取时把取件地址登记为常用取件点（IO 线程写盘，避免主线程同步 IO）
+                            if (item.pickupAddress.isNotBlank()) {
+                                scope.launch(Dispatchers.IO) { CommonStationStore.registerPickupPoint(ctx, item.pickupAddress) }
+                            }
+                            onMarkDone(item.id)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        IconText(
+                            R.drawable.ic_package, "标记已取", iconSize = 16.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            iconTint = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                 }
                 // C3: 稍后提醒（1 小时后推通知）
@@ -380,8 +409,10 @@ fun CodeDetailScreen(
                             )
                             android.widget.Toast.makeText(ctx, "已设置 1 小时后稍后提醒", android.widget.Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                     ) {
                         IconText(R.drawable.ic_alarm_clock, "稍后提醒", iconSize = 16.dp)
                     }
@@ -412,12 +443,19 @@ private fun InlineConfirm(label: String, confirmed: Boolean, incorrect: Boolean,
         return
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onCorrect, modifier = Modifier.weight(1f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)) {
+        OutlinedButton(
+            onClick = onCorrect,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+        ) {
             Text(label, style = MaterialTheme.typography.labelSmall)
         }
-        TextButton(onClick = onIncorrect, modifier = Modifier.weight(1f),
+        TextButton(
+            onClick = onIncorrect,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
         ) {
             Text("标记错误", style = MaterialTheme.typography.labelSmall)
@@ -433,8 +471,13 @@ private fun EditableField(label: String, value: String, displayFontSize: android
     var editing by remember { mutableStateOf(false) }
     var editedValue by remember(value) { mutableStateOf(value) }
     val scope = rememberCoroutineScope()
-    // 卡片背景与主页一致（surfaceVariant 浅灰），配合 Sleek 极简风
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    // 卡片背景与首页/设置页一致（纯白 surface + 浅灰 background 分层 + 18dp 大圆角）
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
         Row(
             Modifier.padding(16.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -458,7 +501,7 @@ private fun EditableField(label: String, value: String, displayFontSize: android
                     Text(value, fontSize = displayFontSize, fontWeight = displayFontWeight, color = MaterialTheme.colorScheme.onSurface)
                     TextButton(
                         onClick = { editing = true; editedValue = value },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF8DC0E0))
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                     ) { Text("编辑") }
                 }
             }
