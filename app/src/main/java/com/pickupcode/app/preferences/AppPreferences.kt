@@ -8,8 +8,10 @@ import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -149,7 +151,7 @@ object AppPreferences {
                 enableSmsReceive = prefs[KEY_ENABLE_SMS_RECEIVE] ?: false,
                 enableExpiryRemind = prefs[KEY_ENABLE_EXPIRY_REMIND] ?: true
             )
-        }
+        }.flowOn(Dispatchers.IO)
     }
 
     /** 到期提醒开关（供入库管线排程前检查）。 */

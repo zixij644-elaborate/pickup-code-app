@@ -45,6 +45,7 @@ import com.pickupcode.app.ui.screens.home.HomeScreen
 import com.pickupcode.app.ui.screens.trash.TrashScreen
 import com.pickupcode.app.ui.theme.PickupCodeTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -112,7 +113,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            PickupCodeTheme {
+            PickupCodeTheme(darkMode = settings.darkMode) {
                 when (screen) {
                     Screen.Home -> HomeScreen(
                         hasNotificationPermission = hasNotificationPermission,
@@ -330,11 +331,12 @@ class MainActivity : ComponentActivity() {
         return enabledServices.split(':').any { it.trim() == target }
     }
 
-    /** 开屏异步检测更新：每进程启动仅静默检测一次，失败不打扰；发现未忽略的新版本时弹窗告知。 */
+    /** 开屏异步检测更新：延后到首帧之后再发请求，避免冷启动期初始化网络栈抢占资源。 */
     private fun checkUpdateOnLaunch() {
         if (hasCheckedUpdateOnLaunch) return
         hasCheckedUpdateOnLaunch = true
         lifecycleScope.launch(Dispatchers.IO) {
+            delay(2500L)
             try {
                 val result = UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)
                 if (result is UpdateChecker.CheckResult.Available) {

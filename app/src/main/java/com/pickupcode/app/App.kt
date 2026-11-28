@@ -9,23 +9,28 @@ import com.pickupcode.app.notification.CodeNotificationManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        CodeNotificationManager.createChannels(this)
+        // 渠道注册走后台线程，避免冷启动主线程同步执行 3 次 NotificationManager Binder IPC
+        appScope.launch(Dispatchers.IO) {
+            CodeNotificationManager.createChannels(this@App)
+        }
         cleanScreenshots()
     }
 
     /**
      * 截图治理（代码检查 3-3：截图明文落盘且无 TTL）：
-     * 启动时在 IO 线程跑一次「孤儿清扫 + 30 天硬保留期 + 50MB 总量上限」。
-     * 放后台、捕获全部异常——清理失败绝不该影响启动。
+     * 延后到首帧之后在 IO 线程跑「孤儿清扫 + 30 天硬保留期 + 50MB 总量上限」，
+     * 避免冷启动期与首页列表抢占 Room 数据库锁及 Keystore/磁盘 IO。
      */
     private fun cleanScreenshots() {
         appScope.launch(Dispatchers.IO) {
+            delay(2500L)
             try {
                 CommonStationStore.migrateLegacyAddresses(this@App)
                 PatternLearner.migrateLegacySamples(this@App)

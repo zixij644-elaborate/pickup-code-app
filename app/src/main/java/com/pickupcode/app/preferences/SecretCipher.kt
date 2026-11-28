@@ -31,28 +31,39 @@ object SecretCipher {
     private const val ENC_PREFIX = "v1:"
     private const val AES_TRANSFORM = "AES/GCM/NoPadding"
 
+    @Volatile
+    private var cachedKey: SecretKey? = null
+
     /** 是否是本工具产出的密文。 */
     fun isEncrypted(value: String): Boolean = value.startsWith(ENC_PREFIX)
 
-    /** 取/生成 Keystore 内不可导出的 AES 密钥（备份恢复后密钥丢失→解密失败按空值处理）。 */
-    private fun keystoreKey(): SecretKey? = try {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey) ?: run {
-            val g = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            g.init(
-                KeyGenParameterSpec.Builder(
-                    KEYSTORE_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build()
-            )
-            g.generateKey()
+    /** 取/生成 Keystore 内不可导出的 AES 密钥（进程内缓存，避免反复 KeyStore.load 走 Binder）。 */
+    private fun keystoreKey(): SecretKey? {
+        cachedKey?.let { return it }
+        return synchronized(this) {
+            cachedKey?.let { return it }
+            try {
+                val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                val key = (ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey) ?: run {
+                    val g = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                    g.init(
+                        KeyGenParameterSpec.Builder(
+                            KEYSTORE_ALIAS,
+                            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                        )
+                            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                            .setKeySize(256)
+                            .build()
+                    )
+                    g.generateKey()
+                }
+                cachedKey = key
+                key
+            } catch (_: Exception) {
+                null
+            }
         }
-    } catch (_: Exception) {
-        null
     }
 
     /**

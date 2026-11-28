@@ -8,11 +8,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import com.pickupcode.app.preferences.AppPreferences
 
 // 清爽蓝色系（浅色）
 private val LightColorScheme = lightColorScheme(
@@ -64,15 +62,11 @@ private val AppShapes = Shapes(
 
 @Composable
 fun PickupCodeTheme(
+    darkMode: String = "system",
     content: @Composable () -> Unit
 ) {
-    val context = LocalContext.current
-    val settings by AppPreferences.observe(context).collectAsState(
-        initial = AppPreferences.Settings()
-    )
-
     val systemDark = isSystemInDarkTheme()
-    val isDark = when (settings.darkMode) {
+    val isDark = when (darkMode) {
         "dark" -> true
         "light" -> false
         else -> systemDark
