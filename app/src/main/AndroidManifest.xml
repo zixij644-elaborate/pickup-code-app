@@ -41,7 +41,7 @@
         android:name=".App"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="码上闪记"
+        android:label="${appName}"
         android:supportsRtl="true"
         android:theme="@style/Theme.PickupCode">
 
