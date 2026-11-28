@@ -90,7 +90,10 @@ class MainActivity : ComponentActivity() {
                 .collectAsState(initial = AppPreferences.Settings())
 
             BackHandler(enabled = screen != Screen.Home) {
-                currentScreen = Screen.Home.name
+                currentScreen = when (screen) {
+                    Screen.SavedAddress, Screen.Rules -> Screen.Settings.name
+                    else -> Screen.Home.name
+                }
             }
 
             // B3: 消费通知 extra 驱动的去重页跳转（组合期用 LaunchedEffect 置状态，避免直接改路由）
